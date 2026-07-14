@@ -11,6 +11,7 @@ import {
   syncAccount
 } from "./api";
 import type { AccountSummary, AutoSyncStatus, DailyEstimateSummary, TaskVideoRow } from "./types";
+import { formatMoney, isNegativeMoney, isVisibleMoneyChange, normalizeMoney } from "./money";
 import "./styles.css";
 
 const TASK_GROUPS_PER_PAGE = 6;
@@ -90,10 +91,6 @@ type RankingStats = {
 
 function formatNumber(value: number | null): string {
   return value === null ? "--" : value.toLocaleString("zh-CN");
-}
-
-function formatMoney(value: number | null): string {
-  return value === null ? "--" : `¥${value.toFixed(2)}`;
 }
 
 function formatTime(value: string | null): string {
@@ -179,7 +176,7 @@ function buildGroups(rows: TaskVideoRow[]): AccountGroup[] {
         yesterdayEstimatedIncome: row.hasYesterdayTaskBaseline === 1 ? row.yesterdayTaskPredictedAmount : null,
         todayEstimatedDelta:
           row.hasYesterdayTaskBaseline === 1 && row.missionEstimatedAmount !== null && row.yesterdayTaskPredictedAmount !== null
-            ? row.missionEstimatedAmount - row.yesterdayTaskPredictedAmount
+            ? normalizeMoney(row.missionEstimatedAmount - row.yesterdayTaskPredictedAmount)
             : null,
         todayPublishedCount: 0,
         hasDailyBaseline: row.hasYesterdayTaskBaseline === 1,
@@ -238,14 +235,14 @@ function buildGroups(rows: TaskVideoRow[]): AccountGroup[] {
 }
 
 function buildRankingStats(tasks: TaskGroup[], dailyEstimateSummary: DailyEstimateSummary | null): RankingStats {
-  const changedTasks = tasks.filter((task) => task.todayEstimatedDelta !== null && task.todayEstimatedDelta !== 0);
+  const changedTasks = tasks.filter((task) => isVisibleMoneyChange(task.todayEstimatedDelta));
 
   return {
     updatedTaskCount: changedTasks.length,
     dailyDelta:
       dailyEstimateSummary?.yesterdayEstimatedTotal === null || dailyEstimateSummary === null
         ? null
-        : dailyEstimateSummary.todayEstimatedTotal - dailyEstimateSummary.yesterdayEstimatedTotal,
+        : normalizeMoney(dailyEstimateSummary.todayEstimatedTotal - dailyEstimateSummary.yesterdayEstimatedTotal),
     updatedAccountCount: new Set(changedTasks.map((task) => task.accountId)).size,
     topTask: changedTasks[0] ?? null
   };
@@ -278,9 +275,9 @@ export default function App() {
     () =>
       groupedRows
         .flatMap((account) => account.tasks)
-        .filter((task) => task.todayEstimatedDelta !== null && task.todayEstimatedDelta !== 0)
+        .filter((task) => isVisibleMoneyChange(task.todayEstimatedDelta))
         .sort((left, right) => {
-          const deltaDifference = (right.todayEstimatedDelta ?? 0) - (left.todayEstimatedDelta ?? 0);
+          const deltaDifference = normalizeMoney(right.todayEstimatedDelta ?? 0) - normalizeMoney(left.todayEstimatedDelta ?? 0);
           if (deltaDifference !== 0) {
             return deltaDifference;
           }
@@ -834,7 +831,7 @@ export default function App() {
               </div>
               <div>
                 <span>今日预估增量</span>
-                <strong className={(rankingStats.dailyDelta ?? 0) < 0 ? "amount-negative" : "amount-positive"}>
+                <strong className={isNegativeMoney(rankingStats.dailyDelta) ? "amount-negative" : "amount-positive"}>
                   {formatMoney(rankingStats.dailyDelta)}
                 </strong>
               </div>
@@ -888,7 +885,7 @@ export default function App() {
                             <td>{task.taskName}</td>
                             <td>{formatMoney(task.yesterdayEstimatedIncome)}</td>
                             <td>{formatMoney(task.estimatedIncome)}</td>
-                            <td className={(task.todayEstimatedDelta ?? 0) < 0 ? "amount-negative" : "amount-positive"}>
+                            <td className={isNegativeMoney(task.todayEstimatedDelta) ? "amount-negative" : "amount-positive"}>
                               {formatMoney(task.todayEstimatedDelta)}
                             </td>
                             <td>{task.todayPublishedCount}</td>
@@ -924,7 +921,7 @@ export default function App() {
                                           <td>{row.videoTitle ?? "--"}</td>
                                           <td>{formatMoney(row.yesterdayPredictedAmount)}</td>
                                           <td>{formatMoney(row.predictedAmount)}</td>
-                                          <td className={(row.todayPredictedDelta ?? 0) < 0 ? "amount-negative" : "amount-positive"}>
+                                          <td className={isNegativeMoney(row.todayPredictedDelta) ? "amount-negative" : "amount-positive"}>
                                             {formatMoney(row.todayPredictedDelta)}
                                           </td>
                                           <td>{formatNumber(row.actualPlayCount)}</td>
