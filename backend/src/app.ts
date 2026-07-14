@@ -10,7 +10,7 @@ import { ScraperService } from "./services/scraper.js";
 export function buildApp() {
   const app = Fastify({ logger: true });
   const db = new AppDatabase();
-  const scraper = new ScraperService(db);
+  const scraper = new ScraperService(db, app.log);
   const autoSync = new AutoSyncService(db, scraper, app.log);
 
   void app.register(cors, { origin: true });

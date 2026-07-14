@@ -13,13 +13,16 @@ import type {
 import { AppDatabase } from "./db.js";
 
 const CREATOR_LOGIN_URL = "https://creator.douyin.com/creator-micro/revenue/tasks";
-const WORKS_MANAGE_URL = "https://creator.douyin.com/creator-micro/content/manage";
 const TASK_LIST_API = "https://creator.douyin.com/aweme/v1/creator/mission/mine/card/list/";
 const TASK_DETAIL_API =
   "https://creator.douyin.com/web/api/third_party/star/gw/api/challenge/author_get_challenge_order_list";
 const TASK_SUMMARY_API = "https://creator.douyin.com/web/api/third_party/star/gw/api/challenge/author_get_challenge";
 const WORK_LIST_API = "https://creator.douyin.com/janus/douyin/creator/pc/work_list";
 const SESSION_LOCK_FILENAMES = ["SingletonCookie", "SingletonLock", "SingletonSocket", "lockfile", "DevToolsActivePort"];
+const TASK_DETAIL_CONCURRENCY = 3;
+const PLATFORM_REQUEST_CONCURRENCY = 3;
+const FETCH_RETRY_ATTEMPTS = 3;
+const FETCH_RETRY_BASE_DELAY_MS = 300;
 
 const CHROME_CANDIDATE_PATHS = [
   process.env.CHROME_EXECUTABLE_PATH,
@@ -142,7 +145,130 @@ type AccountIdentity = {
   displayName: string | null;
 };
 
+type LoggerLike = {
+  info(message: string): void;
+};
+
+type ScrapeMetrics = {
+  requestCount: number;
+  retryCount: number;
+  workVideosMs: number;
+  taskCardsMs: number;
+  taskDetailsMs: number;
+};
+
 export class SessionExpiredError extends Error {}
+
+export class FetchRequestError extends Error {
+  constructor(readonly status: number, url: string) {
+    super(`Request failed (${status}): ${url}`);
+  }
+}
+
+export class PlatformTemporaryError extends Error {}
+
+export class RequestLimiter {
+  private activeCount = 0;
+  private readonly waiters: Array<() => void> = [];
+
+  constructor(private readonly maxConcurrency: number) {}
+
+  async run<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.activeCount >= this.maxConcurrency) {
+      await new Promise<void>((resolve) => this.waiters.push(resolve));
+    }
+
+    this.activeCount += 1;
+    try {
+      return await operation();
+    } finally {
+      this.activeCount -= 1;
+      this.waiters.shift()?.();
+    }
+  }
+}
+
+export function isRetryableFetchError(error: unknown): boolean {
+  if (error instanceof FetchRequestError) {
+    return error.status === 429 || (error.status >= 500 && error.status < 600);
+  }
+
+  if (error instanceof PlatformTemporaryError) {
+    return true;
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("timeout") ||
+    message.includes("timed out") ||
+    message.includes("net::err_") ||
+    message.includes("econnreset") ||
+    message.includes("socket hang up") ||
+    message.includes("network error")
+  );
+}
+
+export async function retryFetch<T>(
+  operation: () => Promise<T>,
+  options: {
+    attempts?: number;
+    wait?: (delayMs: number) => Promise<void>;
+    onRetry?: () => void;
+  } = {}
+): Promise<T> {
+  const attempts = options.attempts ?? FETCH_RETRY_ATTEMPTS;
+  const wait = options.wait ?? ((delayMs) => new Promise<void>((resolve) => setTimeout(resolve, delayMs)));
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt + 1 >= attempts || !isRetryableFetchError(error)) {
+        throw error;
+      }
+
+      options.onRetry?.();
+      await wait(FETCH_RETRY_BASE_DELAY_MS * 2 ** attempt);
+    }
+  }
+
+  throw new Error("Fetch retry attempts were exhausted");
+}
+
+export async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  let failed = false;
+  const workerCount = Math.min(Math.max(concurrency, 1), items.length);
+
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (!failed) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      if (currentIndex >= items.length) {
+        return;
+      }
+
+      try {
+        results[currentIndex] = await worker(items[currentIndex]!);
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
+}
 
 function resolveChromeExecutablePath(): string | undefined {
   return CHROME_CANDIDATE_PATHS.find((candidate) => fs.existsSync(candidate));
@@ -332,10 +458,6 @@ function toUserErrorMessage(error: unknown): string {
   return message.split("\n")[0] ?? message;
 }
 
-function buildTaskDetailPageUrl(missionId: string): string {
-  return `https://creator.douyin.com/creator-micro/revenue/redirect/task/submission/detail/${missionId}?from=my_task&utm_source=creator_center&utm_medium=pc_creator_center&front_source=pc_creator_center`;
-}
-
 function readAuditResult(order: ChallengeOrder): { taskText: string | null; videoStatus: VideoStatus } {
   const source = order.audit_info?.audit_result_by_source;
   if (!source || typeof source !== "object") {
@@ -410,7 +532,24 @@ function mapWorkVideoStatus(work: WorkItem): VideoStatus {
   return "published";
 }
 
-async function fetchLooseJson(page: Page, url: string): Promise<unknown> {
+function findPlatformTemporaryError(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const record = payload as {
+    status_message?: unknown;
+    status_msg?: unknown;
+    base_resp?: { status_message?: unknown };
+  };
+  const message = [record.status_message, record.status_msg, record.base_resp?.status_message].find(
+    (value): value is string => typeof value === "string" && value.toLowerCase().includes("internal system error")
+  );
+
+  return message ?? null;
+}
+
+async function fetchLooseJsonOnce(page: Page, url: string): Promise<unknown> {
   const payload = await page.evaluate(async (targetUrl) => {
     const response = await fetch(targetUrl, {
       credentials: "include"
@@ -424,20 +563,53 @@ async function fetchLooseJson(page: Page, url: string): Promise<unknown> {
   }, url);
 
   if (!payload.ok) {
-    throw new Error(`请求失败(${payload.status})：${url}`);
+    throw new FetchRequestError(payload.status, url);
   }
 
-  return JSON.parse(payload.text);
+  const parsed = JSON.parse(payload.text);
+  const temporaryError = findPlatformTemporaryError(parsed);
+  if (temporaryError) {
+    throw new PlatformTemporaryError(temporaryError);
+  }
+
+  return parsed;
 }
 
-async function probeCreatorLogin(page: Page): Promise<LoginState> {
+async function fetchLooseJson(
+  page: Page,
+  url: string,
+  metrics?: Pick<ScrapeMetrics, "requestCount" | "retryCount">,
+  limiter?: RequestLimiter
+): Promise<unknown> {
+  return retryFetch(
+    async () => {
+      const request = async () => {
+        if (metrics) {
+          metrics.requestCount += 1;
+        }
+        return fetchLooseJsonOnce(page, url);
+      };
+
+      return limiter ? limiter.run(request) : request();
+    },
+    {
+      onRetry: () => {
+        if (metrics) {
+          metrics.retryCount += 1;
+        }
+      }
+    }
+  );
+}
+
+async function probeCreatorLogin(page: Page, limiter?: RequestLimiter): Promise<LoginState> {
   try {
     const probeUrl = new URL(TASK_LIST_API);
     probeUrl.searchParams.set("cursor", "0");
     probeUrl.searchParams.set("limit", "1");
     probeUrl.searchParams.set("mission_type", "1");
 
-    const payload = (await fetchLooseJson(page, probeUrl.toString())) as MissionListPayload;
+    const payload = (await fetchLooseJson(page, probeUrl.toString(), undefined, limiter)) as MissionListPayload;
     const apiStatus = payload.base_resp?.status_code ?? payload.status_code;
     const apiMessage = payload.base_resp?.status_message ?? payload.status_message;
 
@@ -460,8 +632,8 @@ async function probeCreatorLogin(page: Page): Promise<LoginState> {
   }
 }
 
-async function ensureLoggedIn(page: Page) {
-  const state = await probeCreatorLogin(page);
+async function ensureLoggedIn(page: Page, limiter?: RequestLimiter) {
+  const state = await probeCreatorLogin(page, limiter);
   if (!state.loggedIn) {
     throw new SessionExpiredError(state.message);
   }
@@ -470,9 +642,13 @@ async function ensureLoggedIn(page: Page) {
 export class ScraperService {
   private readonly loginJobs = new Map<string, Promise<void>>();
   private readonly syncJobs = new Map<string, Promise<void>>();
+  private readonly requestLimiter = new RequestLimiter(PLATFORM_REQUEST_CONCURRENCY);
   private readonly chromeExecutablePath = resolveChromeExecutablePath();
 
-  constructor(private readonly db: AppDatabase) {}
+  constructor(
+    private readonly db: AppDatabase,
+    private readonly logger: LoggerLike = console
+  ) {}
 
   async launchLogin(accountId: string) {
     const account = this.requireAccount(accountId);
@@ -524,6 +700,7 @@ export class ScraperService {
 
   private async runSyncAccount(accountId: string) {
     const account = this.requireAccount(accountId);
+    const startedAt = Date.now();
     try {
       const payload = await this.scrapeCreatorData(account);
       if (payload.accountIdentity.displayName) {
@@ -535,6 +712,9 @@ export class ScraperService {
         lastSyncAt: new Date().toISOString(),
         lastError: null
       });
+      this.logger.info(
+        `[scraper] synced account=${accountId} total_ms=${Date.now() - startedAt} work_videos_ms=${payload.metrics.workVideosMs} task_cards_ms=${payload.metrics.taskCardsMs} task_details_ms=${payload.metrics.taskDetailsMs} tasks=${payload.tasks.length} videos=${payload.videos.length} requests=${payload.metrics.requestCount} retries=${payload.metrics.retryCount}`
+      );
     } catch (error) {
       this.db.updateAccountStatus(accountId, {
         loginStatus: error instanceof SessionExpiredError ? "expired" : "error",
@@ -570,7 +750,7 @@ export class ScraperService {
     const startedAt = Date.now();
 
     while (Date.now() - startedAt < 5 * 60 * 1000) {
-      const state = await probeCreatorLogin(page);
+      const state = await probeCreatorLogin(page, this.requestLimiter);
       if (state.loggedIn) {
         return;
       }
@@ -586,6 +766,7 @@ export class ScraperService {
     tasks: XingtuTaskRecord[];
     videos: VideoRecord[];
     links: Array<{ taskId: string; videoId: string }>;
+    metrics: ScrapeMetrics;
   }> {
     const context = await this.openPersistentContext(account, true);
 
@@ -593,16 +774,36 @@ export class ScraperService {
       const page = context.pages()[0] ?? (await context.newPage());
       await page.goto(CREATOR_LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
       await page.waitForTimeout(1500);
-      await ensureLoggedIn(page);
+      await ensureLoggedIn(page, this.requestLimiter);
 
-      const workPayload = await this.fetchWorkVideos(page, account.id);
-      const missions = await this.fetchTaskCards(page);
+      const metrics: ScrapeMetrics = {
+        requestCount: 0,
+        retryCount: 0,
+        workVideosMs: 0,
+        taskCardsMs: 0,
+        taskDetailsMs: 0
+      };
+      const workVideosStartedAt = Date.now();
+      const workVideosPromise = this.fetchWorkVideos(page, account.id, metrics).then((payload) => {
+        metrics.workVideosMs = Date.now() - workVideosStartedAt;
+        return payload;
+      });
+      const taskCardsStartedAt = Date.now();
+      const taskCardsPromise = this.fetchTaskCards(page, metrics).then((missions) => {
+        metrics.taskCardsMs = Date.now() - taskCardsStartedAt;
+        return missions;
+      });
+      const [workPayload, missions] = await Promise.all([workVideosPromise, taskCardsPromise]);
       const taskMap = new Map<string, XingtuTaskRecord>();
       const videoMap = new Map<string, VideoRecord>(workPayload.videos.map((video) => [video.record.id, video.record]));
       const linkMap = new Map<string, string>();
 
-      for (const mission of missions) {
-        const result = await this.fetchTaskDetailRows(page, account.id, mission, workPayload.videos);
+      const taskDetailsStartedAt = Date.now();
+      const details = await mapWithConcurrency(missions, TASK_DETAIL_CONCURRENCY, (mission) =>
+        this.fetchTaskDetailRows(page, account.id, mission, workPayload.videos, metrics)
+      );
+      metrics.taskDetailsMs = Date.now() - taskDetailsStartedAt;
+      for (const result of details) {
         for (const task of result.tasks) {
           taskMap.set(task.id, task);
         }
@@ -618,14 +819,15 @@ export class ScraperService {
         accountIdentity: workPayload.accountIdentity,
         tasks: [...taskMap.values()],
         videos: [...videoMap.values()],
-        links: [...linkMap.entries()].map(([taskId, videoId]) => ({ taskId, videoId }))
+        links: [...linkMap.entries()].map(([taskId, videoId]) => ({ taskId, videoId })),
+        metrics
       };
     } finally {
       await context.close();
     }
   }
 
-  private async fetchTaskCards(page: Page): Promise<MissionCard[]> {
+  private async fetchTaskCards(page: Page, metrics: ScrapeMetrics): Promise<MissionCard[]> {
     const missions = new Map<string, MissionCard>();
     const statuses: Array<number | null> = [null, 1, 2, 3];
 
@@ -641,7 +843,7 @@ export class ScraperService {
           url.searchParams.set("mission_status", String(status));
         }
 
-        const payload = (await fetchLooseJson(page, url.toString())) as MissionListPayload;
+        const payload = (await fetchLooseJson(page, url.toString(), metrics, this.requestLimiter)) as MissionListPayload;
         const apiStatus = payload.base_resp?.status_code ?? payload.status_code;
         if (apiStatus === 8 || apiStatus === 11001) {
           throw new SessionExpiredError(payload.base_resp?.status_message ?? payload.status_message ?? "登录失效");
@@ -669,7 +871,8 @@ export class ScraperService {
     page: Page,
     accountId: string,
     mission: MissionCard,
-    workVideos: WorkVideoCandidate[]
+    workVideos: WorkVideoCandidate[],
+    metrics: ScrapeMetrics
   ): Promise<{
     tasks: XingtuTaskRecord[];
     videos: VideoRecord[];
@@ -680,16 +883,10 @@ export class ScraperService {
       return { tasks: [], videos: [], links: [] };
     }
 
-    await page.goto(buildTaskDetailPageUrl(missionId), {
-      waitUntil: "domcontentloaded",
-      timeout: 60000
-    });
-    await page.waitForTimeout(2500);
-
     const taskStatus = mapMissionStatus(mission.card_status);
     const summaryUrl = new URL(TASK_SUMMARY_API);
     summaryUrl.searchParams.set("challenge_id", missionId);
-    const summary = (await fetchLooseJson(page, summaryUrl.toString())) as ChallengeSummaryPayload;
+    const summary = (await fetchLooseJson(page, summaryUrl.toString(), metrics, this.requestLimiter)) as ChallengeSummaryPayload;
     if (summary.base_resp?.status_code && summary.base_resp.status_code !== 0) {
       throw new Error(summary.base_resp.status_message ?? `任务汇总请求失败：${missionId}`);
     }
@@ -704,7 +901,7 @@ export class ScraperService {
       url.searchParams.set("page", String(pageNumber));
       url.searchParams.set("limit", "10");
 
-      const payload = (await fetchLooseJson(page, url.toString())) as ChallengeOrderPayload;
+      const payload = (await fetchLooseJson(page, url.toString(), metrics, this.requestLimiter)) as ChallengeOrderPayload;
       if (payload.base_resp?.status_code && payload.base_resp.status_code !== 0) {
         throw new Error(payload.base_resp.status_message ?? `任务详情请求失败：${missionId}`);
       }
@@ -776,14 +973,10 @@ export class ScraperService {
     return { tasks, videos, links };
   }
 
-  private async fetchWorkVideos(page: Page, accountId: string): Promise<{
+  private async fetchWorkVideos(page: Page, accountId: string, metrics: ScrapeMetrics): Promise<{
     accountIdentity: AccountIdentity;
     videos: WorkVideoCandidate[];
   }> {
-    await page.goto(WORKS_MANAGE_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
-    await page.waitForTimeout(2500);
-    await ensureLoggedIn(page);
-
     const videos: WorkVideoCandidate[] = [];
     let displayName: string | null = null;
     let cursor: number | string = 0;
@@ -797,7 +990,7 @@ export class ScraperService {
       url.searchParams.set("device_platform", "android");
       url.searchParams.set("aid", "1128");
 
-      const payload = (await fetchLooseJson(page, url.toString())) as WorkListPayload;
+      const payload = (await fetchLooseJson(page, url.toString(), metrics, this.requestLimiter)) as WorkListPayload;
       if (payload.status_code === 8 || payload.status_code === 11001) {
         throw new SessionExpiredError(payload.status_msg ?? "登录失效");
       }
@@ -912,7 +1105,7 @@ export class ScraperService {
       timeout: 60000
     });
     await page.waitForTimeout(2000);
-    await ensureLoggedIn(page);
+    await ensureLoggedIn(page, this.requestLimiter);
 
     const displayName = await page.evaluate(() => {
       const text = document.body.innerText;
