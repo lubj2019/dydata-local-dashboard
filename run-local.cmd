@@ -2,9 +2,13 @@
 setlocal
 set "ROOT=%~dp0"
 set "NODE_HOME=%ROOT%.local-runtime\node-v22.23.1-win-x64"
-if not exist "%NODE_HOME%\npm.cmd" (
-  echo Local Node.js runtime not found: %NODE_HOME%
-  exit /b 1
+if exist "%NODE_HOME%\npm.cmd" (
+  set "PATH=%NODE_HOME%;%PATH%"
+) else (
+  where npm >nul 2>nul
+  if errorlevel 1 (
+    echo Node.js was not found. Install the Node.js 22 LTS version, then run this file again.
+    exit /b 1
+  )
 )
-set "PATH=%NODE_HOME%;%PATH%"
-call "%NODE_HOME%\npm.cmd" run dev
+call npm run dev

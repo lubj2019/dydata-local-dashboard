@@ -13,34 +13,54 @@
 - 存储星图任务、抖音视频、自动/手工绑定关系
 - 展示星图播放量、当前实际播放量、差值、视频状态、任务状态
 
-## 安装
+## 在没有开发环境的 Windows 电脑上安装
 
-当前机器的 `node` 可用，但 `npm` 不在 `PATH`。如果你的环境已安装标准 Node.js，请先确保能直接执行 `npm`：
+适用于 Windows 10/11 64 位电脑。首次安装需要联网，但不需要安装 Git、Python、VS Code 或其他开发工具。
 
-```powershell
-npm install
-npx playwright install chromium
-```
+1. 在 GitHub 仓库页面选择 **Code > Download ZIP**，解压到本地文件夹。仓库为私有仓库，需要先登录有访问权限的 GitHub 账号。
+2. 从 [Node.js 官网](https://nodejs.org/en/download) 安装 **Node.js 22 LTS** 的 Windows 安装包。安装时保持默认选项。
+3. 打开解压后的项目文件夹，在地址栏输入 `powershell` 并按回车。执行以下命令确认 Node.js 可用：
 
-如果仍然不能执行 `npm`，先安装标准版 Node.js，再回到项目目录执行上述命令。
+   ```powershell
+   node -v
+   npm -v
+   ```
+
+4. 在同一 PowerShell 窗口执行首次安装：
+
+   ```powershell
+   npm ci
+   npx playwright install chromium
+   ```
+
+   这会下载项目依赖和用于扫码登录、同步数据的 Chromium 浏览器。首次执行通常需要几分钟。
 
 ## 启动
+
+安装完成后，双击根目录的 `run-local.cmd`。保持弹出的命令窗口开启，等待启动日志完成后，在浏览器打开：
+
+```text
+http://127.0.0.1:5173
+```
+
+也可以在项目目录的 PowerShell 中执行：
 
 ```powershell
 npm run dev
 ```
 
-或分别启动：
-
-```powershell
-npm run dev:backend
-npm run dev:frontend
-```
-
 - 前端默认端口：`5173`
 - 后端默认端口：`8787`
+- 关闭命令窗口或按 `Ctrl+C` 即可停止服务。
 
-如果系统 `npm` 仍然不可用，直接运行根目录的 `run-local.cmd`。
+`run-local.cmd` 会优先使用项目目录中已有的本地 Node.js；在从 GitHub 下载的全新副本中，它会自动使用已安装的 Node.js 22 LTS。
+
+## 常见问题
+
+- 提示 `Node.js was not found`：重新安装 Node.js 22 LTS，然后关闭并重新打开命令窗口后再启动。
+- `npx playwright install chromium` 下载失败：确认网络可访问后重新执行该命令。
+- 浏览器无法打开页面：确认命令窗口仍在运行，并手动访问 `http://127.0.0.1:5173`。
+- 首次启动会创建空的本地数据库和登录会话。需要保留既有数据时，离线复制 `.local-data` 目录；该目录包含账号数据和登录态，不能上传到 GitHub。
 
 ## 说明
 
