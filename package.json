@@ -1,0 +1,19 @@
+{
+  "name": "dydata-local-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "frontend",
+    "backend",
+    "motion-chart"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:backend": "npm run dev --workspace backend",
+    "dev:frontend": "npm run dev --workspace frontend",
+    "build": "npm run build --workspace backend && npm run build --workspace frontend",
+    "test": "npm run test --workspace backend",
+    "dev:remotion": "npm run studio --workspace remotion-chart",
+    "render:remotion": "npm run render --workspace remotion-chart"
+  }
+}

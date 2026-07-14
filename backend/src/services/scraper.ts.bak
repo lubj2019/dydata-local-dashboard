@@ -1,0 +1,409 @@
+import fs from "node:fs";
+import path from "node:path";
+import { chromium, type BrowserContext, type Page } from "playwright";
+import { autoMatchTasksToVideos } from "../domain/matching.js";
+import { normalizeTaskStatus, normalizeVideoStatus } from "../domain/status.js";
+import type { AccountRecord, VideoRecord, XingtuTaskRecord } from "../domain/types.js";
+import { AppDatabase } from "./db.js";
+
+const XINGTU_URLS = [
+  "https://buyin.jinritemai.com/dashboard/author/home",
+  "https://star.toutiao.com"
+];
+
+const DOUYIN_URLS = [
+  "https://creator.douyin.com/creator-micro/content/manage",
+  "https://www.douyin.com/user/self"
+];
+
+const CHROME_CANDIDATE_PATHS = [
+  process.env.CHROME_EXECUTABLE_PATH,
+  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+  path.join(process.env.LOCALAPPDATA ?? "", "Google\\Chrome\\Application\\chrome.exe")
+].filter((value): value is string => Boolean(value));
+
+export class SessionExpiredError extends Error {}
+
+function resolveChromeExecutablePath(): string | undefined {
+  return CHROME_CANDIDATE_PATHS.find((candidate) => fs.existsSync(candidate));
+}
+
+type ExtractedRow = {
+  id: string;
+  title: string | null;
+  subtitle: string | null;
+  publishedAt: string | null;
+  primaryNumber: string | null;
+  secondaryNumber: string | null;
+  statusText: string | null;
+  sourceUrl: string | null;
+  coverUrl: string | null;
+};
+
+function parseChineseNumber(value: string | null | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const cleaned = value.replace(/,/g, "").trim();
+  const match = cleaned.match(/([0-9]+(?:\.[0-9]+)?)(\u4e07|\u4ebf)?/);
+  if (!match) {
+    return null;
+  }
+
+  const base = Number(match[1]);
+  if (!Number.isFinite(base)) {
+    return null;
+  }
+
+  if (match[2] === "\u4e07") {
+    return Math.round(base * 10000);
+  }
+  if (match[2] === "\u4ebf") {
+    return Math.round(base * 100000000);
+  }
+  return Math.round(base);
+}
+
+function parseAmount(value: string | null | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const cleaned = value.replace(/[\u00a5\uffe5,\s]/g, "");
+  const match = cleaned.match(/[0-9]+(?:\.[0-9]+)?/);
+  return match ? Number(match[0]) : null;
+}
+
+type LoginState = {
+  loggedIn: boolean;
+  message: string;
+};
+
+function toUserErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : "操作失败";
+  if (message.includes("Target page, context or browser has been closed")) {
+    return "浏览器启动失败，请关闭占用中的登录窗口后重试";
+  }
+
+  return message.split("\n")[0] ?? message;
+}
+
+async function readPageText(page: Page): Promise<string> {
+  return page.locator("body").innerText().catch(() => "");
+}
+
+async function inspectDouyinLogin(page: Page): Promise<LoginState> {
+  const text = await readPageText(page);
+  const url = page.url();
+  if (!text.trim() || url === "about:blank") {
+    return {
+      loggedIn: false,
+      message: "抖音创作者中心页面尚未正常加载，请继续等�?
+    };
+  }
+
+  if (/(\u626b\u7801\u767b\u5f55|\u9a8c\u8bc1\u7801\u767b\u5f55|\u5bc6\u7801\u767b\u5f55|\u767b\u5f55\/\u6ce8\u518c|\u5982\u4f55\u626b\u7801)/.test(text)) {
+    return {
+      loggedIn: false,
+      message: "抖音创作者中心仍未登录，请继续扫�?
+    };
+  }
+
+  return {
+    loggedIn: true,
+    message: "抖音创作者中心已登录"
+  };
+}
+
+async function inspectXingtuLogin(page: Page): Promise<LoginState> {
+  const text = await readPageText(page);
+  const url = page.url();
+  if (!text.trim() || url === "about:blank") {
+    return {
+      loggedIn: false,
+      message: "星图/电商达人工作台页面尚未正常加载，请继续等�?
+    };
+  }
+
+  if (
+    url.startsWith("https://www.douyinec.com/") ||
+    /(\u767b\u5f55|\u7acb\u5373\u5165\u9a7b|\u5546\u5bb6\u5165\u9a7b|\u8fbe\u4eba\u5165\u9a7b|\u8fbe\u4eba\u5de5\u4f5c\u53f0)/.test(text)
+  ) {
+    return {
+      loggedIn: false,
+      message: "星图/电商达人工作台仍未登录，请继续扫�?
+    };
+  }
+
+  return {
+    loggedIn: true,
+    message: "星图/电商达人工作台已登录"
+  };
+}
+
+async function ensureLoggedIn(page: Page, inspector: (page: Page) => Promise<LoginState>) {
+  const text = await page.locator("body").innerText().catch(() => "");
+  if (!text.trim()) {
+    throw new SessionExpiredError("页面未正常加载，请重新扫码登�?);
+  }
+
+  const state = await inspector(page);
+  if (!state.loggedIn) {
+    throw new SessionExpiredError(state.message);
+  }
+}
+
+async function extractRows(page: Page): Promise<ExtractedRow[]> {
+  return page.evaluate(() => {
+    const isContainer = (element: Element) => {
+      const tagName = element.tagName.toLowerCase();
+      return tagName === "tr" || tagName === "article" || tagName === "li" || tagName === "section" || tagName === "div";
+    };
+
+    const candidates = Array.from(document.querySelectorAll("tr, article, li, section, div"))
+      .filter((element) => isContainer(element))
+      .filter((element) => {
+        const text = (element.textContent ?? "").replace(/\s+/g, " ").trim();
+        return text.length >= 12 && /(\u64ad\u653e|\u6536\u76ca|\u91d1\u989d|\u5ba1\u6838|\u53d1\u5e03|\u4efb\u52a1)/.test(text);
+      })
+      .slice(0, 300);
+
+    const rows = candidates.map((element, index) => {
+      const text = (element.textContent ?? "").replace(/\s+/g, " ").trim();
+      const lines = text.split(/(?<=\d)\s+(?=\D)|\s{2,}/).map((part) => part.trim()).filter(Boolean);
+      const anchors = Array.from(element.querySelectorAll("a")).map((anchor) => anchor.href).filter(Boolean);
+      const image = element.querySelector("img") as HTMLImageElement | null;
+      const publishedAt = text.match(/\d{4}[-/.]\d{2}[-/.]\d{2}(?:\s+\d{2}:\d{2}(?::\d{2})?)?/)?.[0] ?? null;
+      const numbers = Array.from(
+        text.matchAll(/[\u00a5\uffe5]?\s*[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?(?:\u4e07|\u4ebf)?/g)
+      ).map((match) =>
+        match[0].trim()
+      );
+      const statusText =
+        lines.find((line) =>
+          /(\u5ba1\u6838|\u53d1\u5e03|\u79c1\u5bc6|\u5220\u9664|\u6682\u505c|\u7ed3\u7b97|\u5b8c\u6210|\u5f02\u5e38|\u8fdb\u884c\u4e2d)/.test(
+            line
+          )
+        ) ?? null;
+      const title = lines.find((line) => line.length >= 3 && !/\d{4}-\d{2}-\d{2}/.test(line)) ?? null;
+
+      return {
+        id:
+          anchors[0]?.match(/([0-9]{6,})/)?.[1] ??
+          image?.src.match(/([0-9]{6,})/)?.[1] ??
+          `row_${index}_${btoa(unescape(encodeURIComponent(text.slice(0, 24)))).replace(/=/g, "")}`,
+        title,
+        subtitle: lines[1] ?? null,
+        publishedAt,
+        primaryNumber: numbers[0] ?? null,
+        secondaryNumber: numbers[1] ?? null,
+        statusText,
+        sourceUrl: anchors[0] ?? null,
+        coverUrl: image?.src ?? null
+      };
+    });
+
+    const uniqueRows = new Map<string, (typeof rows)[number]>();
+    for (const row of rows) {
+      if (!uniqueRows.has(row.id)) {
+        uniqueRows.set(row.id, row);
+      }
+    }
+
+    return [...uniqueRows.values()];
+  });
+}
+
+export class ScraperService {
+  private readonly loginJobs = new Map<string, Promise<void>>();
+  private readonly chromeExecutablePath = resolveChromeExecutablePath();
+
+  constructor(private readonly db: AppDatabase) {}
+
+  async launchLogin(accountId: string) {
+    const account = this.requireAccount(accountId);
+    if (this.loginJobs.has(accountId)) {
+      return;
+    }
+
+    this.db.updateAccountStatus(accountId, {
+      loginStatus: "waiting_scan",
+      lastError: null
+    });
+
+    const job = this.runLoginFlow(account)
+      .catch((error) => {
+        this.db.updateAccountStatus(accountId, {
+          loginStatus: "error",
+          lastError: toUserErrorMessage(error)
+        });
+      })
+      .finally(() => {
+        this.loginJobs.delete(accountId);
+      });
+
+    this.loginJobs.set(accountId, job);
+  }
+
+  async syncAccount(accountId: string) {
+    const account = this.requireAccount(accountId);
+    try {
+      const [tasks, videos] = await Promise.all([
+        this.scrapeXingtuTasks(account),
+        this.scrapeDouyinVideos(account)
+      ]);
+
+      this.db.upsertTasks(tasks);
+      this.db.upsertVideos(videos);
+
+      const freshTasks = this.db.listTasksByAccount(accountId);
+      const freshVideos = this.db.listVideosByAccount(accountId);
+      const matches = autoMatchTasksToVideos(freshTasks, freshVideos);
+      this.db.replaceAutoLinks(accountId, matches);
+
+      this.db.updateAccountStatus(accountId, {
+        loginStatus: "active",
+        lastSyncAt: new Date().toISOString(),
+        lastError: null
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "同步失败";
+      this.db.updateAccountStatus(accountId, {
+        loginStatus: error instanceof SessionExpiredError ? "expired" : "error",
+        lastError: toUserErrorMessage(message)
+      });
+      throw error;
+    }
+  }
+
+  private requireAccount(accountId: string): AccountRecord {
+    const account = this.db.getAccount(accountId);
+    if (!account) {
+      throw new Error("账号不存�?);
+    }
+    return account;
+  }
+
+  private async runLoginFlow(account: AccountRecord) {
+    fs.mkdirSync(account.sessionDir, { recursive: true });
+    const launchOptions = {
+      headless: false,
+      viewport: { width: 1440, height: 960 }
+    } as const;
+    const context = await chromium.launchPersistentContext(account.sessionDir, this.chromeExecutablePath
+      ? { ...launchOptions, executablePath: this.chromeExecutablePath }
+      : launchOptions);
+
+    try {
+      const douyinPage = context.pages()[0] ?? (await context.newPage());
+      await douyinPage.goto(DOUYIN_URLS[0]!, { waitUntil: "domcontentloaded" });
+      await douyinPage.bringToFront();
+      await this.waitForLogin(douyinPage);
+
+      this.db.updateAccountStatus(account.id, {
+        loginStatus: "active",
+        lastError: null
+      });
+    } finally {
+      await context.close();
+    }
+  }
+
+  private async waitForLogin(douyinPage: Page): Promise<void> {
+    const startedAt = Date.now();
+    let lastMessage = "请在打开的浏览器中完成抖音和星图扫码登录";
+    while (Date.now() - startedAt < 5 * 60 * 1000) {
+      const douyinState = await inspectDouyinLogin(douyinPage);
+      if (douyinState.loggedIn) {
+        return;
+      }
+
+      lastMessage = douyinState.message;
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+
+    throw new Error(lastMessage || "扫码登录超时，请重试");
+  }
+
+  private async withSessionPage<T>(
+    account: AccountRecord,
+    url: string,
+    inspector: (page: Page) => Promise<LoginState>,
+    action: (page: Page) => Promise<T>
+  ): Promise<T> {
+    const launchOptions = {
+      headless: true,
+      viewport: { width: 1440, height: 960 }
+    } as const;
+    const context = await chromium.launchPersistentContext(account.sessionDir, this.chromeExecutablePath
+      ? { ...launchOptions, executablePath: this.chromeExecutablePath }
+      : launchOptions);
+
+    try {
+      const page = context.pages()[0] ?? (await context.newPage());
+      await page.goto(url, { waitUntil: "domcontentloaded" });
+      await page.waitForTimeout(2500);
+      await ensureLoggedIn(page, inspector);
+      return action(page);
+    } finally {
+      await context.close();
+    }
+  }
+
+  private async scrapeXingtuTasks(account: AccountRecord): Promise<XingtuTaskRecord[]> {
+    for (const url of XINGTU_URLS) {
+      try {
+        return await this.withSessionPage(account, url, inspectXingtuLogin, async (page) => {
+          const rows = await extractRows(page);
+          return rows.map((row) => ({
+            id: `task_${row.id}`,
+            accountId: account.id,
+            taskName: row.title ?? "未命名任�?,
+            videoTitle: row.title,
+            coverUrl: row.coverUrl,
+            publishedAt: row.publishedAt,
+            xingtuPlayCount: parseChineseNumber(row.primaryNumber),
+            predictedAmount: parseAmount(row.secondaryNumber),
+            settledAmount: null,
+            taskStatus: normalizeTaskStatus(row.statusText),
+            sourceUrl: row.sourceUrl
+          }));
+        });
+      } catch (error) {
+        if (error instanceof SessionExpiredError) {
+          throw error;
+        }
+      }
+    }
+
+    throw new Error("未能抓取星图任务页面，请确认账号已登录并且目标页面可访问");
+  }
+
+  private async scrapeDouyinVideos(account: AccountRecord): Promise<VideoRecord[]> {
+    for (const url of DOUYIN_URLS) {
+      try {
+        return await this.withSessionPage(account, url, inspectDouyinLogin, async (page) => {
+          const rows = await extractRows(page);
+          return rows.map((row) => ({
+            id: row.id.replace(/^task_/, ""),
+            accountId: account.id,
+            title: row.title ?? "未命名视�?,
+            coverUrl: row.coverUrl,
+            publishedAt: row.publishedAt,
+            actualPlayCount: parseChineseNumber(row.primaryNumber),
+            videoStatus: normalizeVideoStatus(row.statusText),
+            sourceUrl: row.sourceUrl
+          }));
+        });
+      } catch (error) {
+        if (error instanceof SessionExpiredError) {
+          throw error;
+        }
+      }
+    }
+
+    throw new Error("未能抓取抖音视频页面，请确认账号已登录并且目标页面可访问");
+  }
+}

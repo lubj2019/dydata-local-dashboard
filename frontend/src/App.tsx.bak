@@ -1,0 +1,353 @@
+import { FormEvent, useEffect, useState } from "react";
+import { bindTaskVideo, createAccount, deleteAccount, getAccounts, getTaskVideos, launchLogin, syncAccount } from "./api";
+import type { AccountSummary, TaskVideoRow } from "./types";
+import "./styles.css";
+
+const loginStatusLabels: Record<string, string> = {
+  never_logged_in: "未登�?,
+  waiting_scan: "等待扫码",
+  active: "已登�?,
+  expired: "登录失效",
+  error: "登录异常"
+};
+
+const taskStatusLabels: Record<string, string> = {
+  in_progress: "进行�?,
+  settling: "结算�?,
+  completed: "已完�?,
+  paused: "已暂�?,
+  abnormal: "异常",
+  unknown: "未知"
+};
+
+const videoStatusLabels: Record<string, string> = {
+  published: "已发�?,
+  reviewing: "审核�?,
+  rejected: "审核拒绝",
+  private: "私密",
+  deleted: "已删�?,
+  unknown: "未知"
+};
+
+function formatNumber(value: number | null): string {
+  return value === null ? "--" : value.toLocaleString("zh-CN");
+}
+
+function formatTime(value: string | null): string {
+  return value ? new Date(value).toLocaleString("zh-CN") : "--";
+}
+
+function formatErrorText(value: string | null): string {
+  if (!value) {
+    return "最近无错误";
+  }
+
+  const firstLine = value.split("\n")[0]?.trim() ?? value;
+  return firstLine.length > 120 ? `${firstLine.slice(0, 120)}...` : firstLine;
+}
+
+export default function App() {
+  const [accounts, setAccounts] = useState<AccountSummary[]>([]);
+  const [rows, setRows] = useState<TaskVideoRow[]>([]);
+  const [displayName, setDisplayName] = useState("");
+  const [selectedAccountId, setSelectedAccountId] = useState("");
+  const [selectedStatus, setSelectedStatus] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [bindInputs, setBindInputs] = useState<Record<string, string>>({});
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refreshAccounts() {
+    setAccounts(await getAccounts());
+  }
+
+  async function refreshRows(accountId = selectedAccountId, status = selectedStatus) {
+    setRows(await getTaskVideos({ accountId, status }));
+  }
+
+  async function refreshAll(accountId = selectedAccountId, status = selectedStatus) {
+    const [accountList, taskRows] = await Promise.all([
+      getAccounts(),
+      getTaskVideos({ accountId, status })
+    ]);
+    setAccounts(accountList);
+    setRows(taskRows);
+  }
+
+  useEffect(() => {
+    void refreshAll();
+  }, []);
+
+  useEffect(() => {
+    const hasPendingLogin = accounts.some((account) => account.loginStatus === "waiting_scan");
+    if (!hasPendingLogin) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void refreshAccounts();
+    }, 3000);
+
+    return () => window.clearInterval(timer);
+  }, [accounts]);
+
+  async function handleCreateAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!displayName.trim()) {
+      setError("请输入账号名�?);
+      return;
+    }
+
+    setError(null);
+    setMessage(null);
+    await createAccount(displayName.trim());
+    setDisplayName("");
+    setMessage("账号已创�?);
+    await refreshAll();
+  }
+
+  async function handleLaunchLogin(accountId: string) {
+    setBusyId(accountId);
+    setError(null);
+    setMessage(null);
+    try {
+      await launchLogin(accountId);
+      setMessage("已打开扫码登录窗口，请在浏览器中完成抖�?星图扫码");
+      await refreshAccounts();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "登录窗口启动失败");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleSync(accountId: string) {
+    setBusyId(accountId);
+    setError(null);
+    setMessage(null);
+    try {
+      await syncAccount(accountId);
+      setMessage("同步完成");
+      await refreshAll();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "同步失败");
+      await refreshAccounts();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleDeleteAccount(accountId: string, displayName: string) {
+    const confirmed = window.confirm(`确认删除账号�?{displayName}”吗？这会同时删除该账号的本地会话和已采集数据。`);
+    if (!confirmed) {
+      return;
+    }
+
+    setBusyId(accountId);
+    setError(null);
+    setMessage(null);
+    try {
+      await deleteAccount(accountId);
+      const nextAccountId = selectedAccountId === accountId ? "" : selectedAccountId;
+      setSelectedAccountId(nextAccountId);
+      setMessage("账号已删�?);
+      await refreshAll(nextAccountId, selectedStatus);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "删除账号失败");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleBind(taskId: string) {
+    const videoId = bindInputs[taskId]?.trim();
+    if (!videoId) {
+      setError("请输�?videoId");
+      return;
+    }
+
+    setError(null);
+    setMessage(null);
+    try {
+      await bindTaskVideo(taskId, videoId);
+      setMessage("绑定已保�?);
+      await refreshRows();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "绑定失败");
+    }
+  }
+
+  async function handleFilterChange(accountId: string, status: string) {
+    setSelectedAccountId(accountId);
+    setSelectedStatus(status);
+    setError(null);
+    await refreshRows(accountId, status);
+  }
+
+  return (
+    <main className="page">
+      <section className="hero">
+        <div>
+          <p className="eyebrow">本地网页 + 本地采集服务</p>
+          <h1>抖音星图任务统计</h1>
+          <p className="subtle">
+            展示星图口径播放量、当前实际播放量、差值、视频状态和任务状态�?          </p>
+        </div>
+        <div className="status-box">
+          <span>账号�?/span>
+          <strong>{accounts.length}</strong>
+          <span>任务视频�?/span>
+          <strong>{rows.length}</strong>
+        </div>
+      </section>
+
+      {message ? <div className="message success">{message}</div> : null}
+      {error ? <div className="message error">{error}</div> : null}
+
+      <section className="panel">
+        <div className="panel-header">
+          <h2>账号�?/h2>
+        </div>
+
+        <form className="account-form" onSubmit={handleCreateAccount}>
+          <input
+            value={displayName}
+            onChange={(event) => setDisplayName(event.target.value)}
+            placeholder="输入账号名称"
+          />
+          <button type="submit">新增账号</button>
+        </form>
+
+        <div className="account-grid">
+          {accounts.map((account) => (
+            <article key={account.id} className="account-card">
+              <div>
+                <h3>{account.displayName}</h3>
+                <p>{account.platform}</p>
+                <p>登录状态：{loginStatusLabels[account.loginStatus] ?? account.loginStatus}</p>
+                <p>最后同步：{formatTime(account.lastSyncAt)}</p>
+                <p className="error-text" title={account.lastError ?? "最近无错误"}>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => handleDeleteAccount(account.id, account.displayName)}
+                  disabled={busyId === account.id}
+                >
+                  ɾ���˺�
+                </button>
+                  {formatErrorText(account.lastError)}
+                </p>
+                {account.loginStatus === "waiting_scan" ? (
+                  <p className="hint-text">浏览器已打开，请扫码完成登录，页面会自动刷新状态�?/p>
+                ) : null}
+              </div>
+              <div className="account-actions">
+                <button
+                  type="button"
+                  onClick={() => handleLaunchLogin(account.id)}
+                  disabled={busyId === account.id}
+                >
+                  {account.loginStatus === "waiting_scan" ? "等待扫码" : "扫码登录"}
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => handleSync(account.id)}
+                  disabled={busyId === account.id || account.loginStatus === "waiting_scan"}
+                >
+                  手动同步
+                </button>
+              </div>
+            </article>
+          ))}
+          {accounts.length === 0 ? <p className="empty">还没有账号，先新增一个账号�?/p> : null}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <h2>任务视频�?/h2>
+          <div className="filters">
+            <select
+              value={selectedAccountId}
+              onChange={(event) => handleFilterChange(event.target.value, selectedStatus)}
+            >
+              <option value="">全部账号</option>
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.displayName}
+                </option>
+              ))}
+            </select>
+            <select
+              value={selectedStatus}
+              onChange={(event) => handleFilterChange(selectedAccountId, event.target.value)}
+            >
+              <option value="">全部任务状�?/option>
+              {Object.entries(taskStatusLabels).map(([key, value]) => (
+                <option key={key} value={key}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>账号</th>
+                <th>视频标题</th>
+                <th>发布时间</th>
+                <th>星图任务</th>
+                <th>星图播放�?/th>
+                <th>当前播放�?/th>
+                <th>差�?/th>
+                <th>视频状�?/th>
+                <th>任务状�?/th>
+                <th>最后同�?/th>
+                <th>绑定</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.taskId}>
+                  <td>{row.accountName}</td>
+                  <td>{row.videoTitle ?? "--"}</td>
+                  <td>{formatTime(row.publishedAt)}</td>
+                  <td>{row.taskName}</td>
+                  <td>{formatNumber(row.xingtuPlayCount)}</td>
+                  <td>{formatNumber(row.actualPlayCount)}</td>
+                  <td>{formatNumber(row.playDelta)}</td>
+                  <td>{row.videoStatus ? (videoStatusLabels[row.videoStatus] ?? row.videoStatus) : "--"}</td>
+                  <td>{taskStatusLabels[row.taskStatus] ?? row.taskStatus}</td>
+                  <td>{formatTime(row.lastSyncedAt)}</td>
+                  <td>
+                    {row.videoId ? (
+                      <span className="pill">{row.matchSource === "manual" ? "手工绑定" : "自动匹配"}</span>
+                    ) : (
+                      <div className="bind-box">
+                        <input
+                          value={bindInputs[row.taskId] ?? ""}
+                          onChange={(event) =>
+                            setBindInputs((current) => ({ ...current, [row.taskId]: event.target.value }))
+                          }
+                          placeholder="输入 videoId"
+                        />
+                        <button type="button" className="secondary" onClick={() => handleBind(row.taskId)}>
+                          绑定
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows.length === 0 ? <p className="empty">当前没有任务视频数据，请先同步账号�?/p> : null}
+        </div>
+      </section>
+    </main>
+  );
+}
