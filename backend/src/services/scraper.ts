@@ -549,6 +549,26 @@ function findPlatformTemporaryError(payload: unknown): string | null {
   return message ?? null;
 }
 
+export function findPlatformLoginError(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const record = payload as {
+    status_message?: unknown;
+    status_msg?: unknown;
+    message?: unknown;
+    base_resp?: { status_message?: unknown };
+  };
+  const message = [record.status_message, record.status_msg, record.message, record.base_resp?.status_message].find(
+    (value): value is string =>
+      typeof value === "string" &&
+      (/\u7528\u6237\u672a\u767b\u5f55|\u767b\u5f55\u5931\u6548|\u767b\u5f55\u8fc7\u671f/i.test(value) || /not\s+logged\s+in|login\s+(?:has\s+)?expired/i.test(value))
+  );
+
+  return message ?? null;
+}
+
 async function fetchLooseJsonOnce(page: Page, url: string): Promise<unknown> {
   const payload = await page.evaluate(async (targetUrl) => {
     const response = await fetch(targetUrl, {
@@ -567,6 +587,10 @@ async function fetchLooseJsonOnce(page: Page, url: string): Promise<unknown> {
   }
 
   const parsed = JSON.parse(payload.text);
+  const loginError = findPlatformLoginError(parsed);
+  if (loginError) {
+    throw new SessionExpiredError(loginError);
+  }
   const temporaryError = findPlatformTemporaryError(parsed);
   if (temporaryError) {
     throw new PlatformTemporaryError(temporaryError);
@@ -620,9 +644,13 @@ async function probeCreatorLogin(page: Page, limiter?: RequestLimiter): Promise<
       };
     }
 
+    const xingtuProbeUrl = new URL(TASK_SUMMARY_API);
+    xingtuProbeUrl.searchParams.set("challenge_id", "0");
+    await fetchLooseJson(page, xingtuProbeUrl.toString(), undefined, limiter);
+
     return {
       loggedIn: true,
-      message: "创作者中心已登录"
+      message: "创作者中心和星图任务接口均已登录"
     };
   } catch (error) {
     return {
@@ -732,15 +760,16 @@ export class ScraperService {
       await page.goto(CREATOR_LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
       await page.bringToFront();
       await this.waitForLogin(page);
-      const accountIdentity = await this.fetchAccountIdentity(page);
-      if (accountIdentity.displayName) {
-        this.db.updateAccountDisplayName(account.id, accountIdentity.displayName);
-      }
 
       this.db.updateAccountStatus(account.id, {
         loginStatus: "active",
         lastError: null
       });
+
+      const accountIdentity = await this.fetchAccountIdentity(page).catch(() => null);
+      if (accountIdentity?.displayName) {
+        this.db.updateAccountDisplayName(account.id, accountIdentity.displayName);
+      }
     } finally {
       await context.close();
     }
@@ -1146,7 +1175,7 @@ export class ScraperService {
     try {
       return await launchContext();
     } catch (error) {
-      if (!headless || !isRecoverableLaunchError(error)) {
+      if (!isRecoverableLaunchError(error)) {
         throw error;
       }
 

@@ -6,7 +6,7 @@ test("isAutoSyncEligibleAccount skips accounts that have not completed login", (
   assert.equal(isAutoSyncEligibleAccount({ loginStatus: "never_logged_in" }), false);
   assert.equal(isAutoSyncEligibleAccount({ loginStatus: "waiting_scan" }), false);
   assert.equal(isAutoSyncEligibleAccount({ loginStatus: "active" }), true);
-  assert.equal(isAutoSyncEligibleAccount({ loginStatus: "expired" }), true);
+  assert.equal(isAutoSyncEligibleAccount({ loginStatus: "expired" }), false);
 });
 
 test("computeNextDailyCutoff returns same-day 23:30 before cutoff", () => {

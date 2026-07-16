@@ -2,12 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   FetchRequestError,
+  findPlatformLoginError,
   isRetryableFetchError,
   mapWithConcurrency,
   PlatformTemporaryError,
   RequestLimiter,
   retryFetch
 } from "../services/scraper.js";
+
+test("findPlatformLoginError detects Xingtu login failures", () => {
+  const message = "\u7528\u6237\u672a\u767b\u5f55[20260716155022776D3CC6F83B4BE07D02]";
+
+  assert.equal(findPlatformLoginError({ base_resp: { status_message: message } }), message);
+  assert.equal(findPlatformLoginError({ status_message: "Internal system error.[request-id]" }), null);
+});
 
 test("mapWithConcurrency caps concurrent work and preserves all results", async () => {
   let active = 0;
