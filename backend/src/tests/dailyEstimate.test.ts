@@ -161,6 +161,41 @@ test("daily estimate summary uses each account's final snapshot of yesterday", (
   db.deleteAccount(account.id);
 });
 
+test("daily estimate summary uses the same task estimate shown in the ranking", () => {
+  const db = new AppDatabase(":memory:");
+  const account = db.createAccount("summary ranking account");
+  const today = new Date();
+  const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+  const taskRecord = {
+    ...task(account.id, "task-ranking", "mission-ranking", 10),
+    missionEstimatedAmount: 10
+  };
+
+  db.replaceAccountSyncData(account.id, { tasks: [taskRecord], videos: [], links: [] }, yesterday);
+  db.replaceAccountSyncData(
+    account.id,
+    {
+      tasks: [
+        {
+          ...taskRecord,
+          predictedAmount: 12,
+          missionEstimatedAmount: 15
+        }
+      ],
+      videos: [],
+      links: []
+    },
+    today
+  );
+
+  assert.deepEqual(db.getDailyEstimateSummary(today), {
+    yesterdayEstimatedTotal: 10,
+    todayEstimatedTotal: 15,
+    dailyIncrease: 5
+  });
+  db.deleteAccount(account.id);
+});
+
 test("ranking baseline only compares the same account and task", () => {
   const db = new AppDatabase(":memory:");
   const account = db.createAccount("ranking account");

@@ -514,8 +514,12 @@ export class AppDatabase {
       .get(yesterdayDate, yesterdayDate) as { snapshotCount: number; total: number };
     const today = this.db
       .prepare(`
-        SELECT COALESCE(SUM(COALESCE(predicted_amount, 0)), 0) as total
-        FROM xingtu_tasks
+        SELECT COALESCE(SUM(COALESCE(mission_estimated_amount, 0)), 0) as total
+        FROM (
+          SELECT account_id, mission_id, MAX(mission_estimated_amount) as mission_estimated_amount
+          FROM xingtu_tasks
+          GROUP BY account_id, mission_id
+        )
       `)
       .get() as { total: number };
     const yesterdayEstimatedTotal = yesterday.snapshotCount === 0 ? null : yesterday.total;
