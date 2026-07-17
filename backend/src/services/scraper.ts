@@ -626,6 +626,15 @@ async function fetchLooseJson(
   );
 }
 
+export function isCreatorTaskApiLoggedIn(payload: MissionListPayload): boolean {
+  const apiStatus = payload.base_resp?.status_code ?? payload.status_code;
+  return apiStatus !== 8 && apiStatus !== 11001;
+}
+
+export function getCreatorLoginProbeMissionId(payload: MissionListPayload): string | null {
+  return normalizeText(payload.mission_cards?.find((mission) => mission.id_str)?.id_str);
+}
+
 async function probeCreatorLogin(page: Page, limiter?: RequestLimiter): Promise<LoginState> {
   try {
     const probeUrl = new URL(TASK_LIST_API);
@@ -634,19 +643,21 @@ async function probeCreatorLogin(page: Page, limiter?: RequestLimiter): Promise<
     probeUrl.searchParams.set("mission_type", "1");
 
     const payload = (await fetchLooseJson(page, probeUrl.toString(), undefined, limiter)) as MissionListPayload;
-    const apiStatus = payload.base_resp?.status_code ?? payload.status_code;
     const apiMessage = payload.base_resp?.status_message ?? payload.status_message;
 
-    if (apiStatus === 8 || apiStatus === 11001) {
+    if (!isCreatorTaskApiLoggedIn(payload)) {
       return {
         loggedIn: false,
         message: apiMessage ?? "创作者中心未登录，请扫码登录"
       };
     }
 
-    const xingtuProbeUrl = new URL(TASK_SUMMARY_API);
-    xingtuProbeUrl.searchParams.set("challenge_id", "0");
-    await fetchLooseJson(page, xingtuProbeUrl.toString(), undefined, limiter);
+    const missionId = getCreatorLoginProbeMissionId(payload);
+    if (missionId) {
+      const xingtuProbeUrl = new URL(TASK_SUMMARY_API);
+      xingtuProbeUrl.searchParams.set("challenge_id", missionId);
+      await fetchLooseJson(page, xingtuProbeUrl.toString(), undefined, limiter);
+    }
 
     return {
       loggedIn: true,

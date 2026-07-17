@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   FetchRequestError,
   findPlatformLoginError,
+  getCreatorLoginProbeMissionId,
+  isCreatorTaskApiLoggedIn,
   isRetryableFetchError,
   mapWithConcurrency,
   PlatformTemporaryError,
@@ -15,6 +17,16 @@ test("findPlatformLoginError detects Xingtu login failures", () => {
 
   assert.equal(findPlatformLoginError({ base_resp: { status_message: message } }), message);
   assert.equal(findPlatformLoginError({ status_message: "Internal system error.[request-id]" }), null);
+});
+
+test("creator login probe accepts an authenticated creator task API response", () => {
+  assert.equal(isCreatorTaskApiLoggedIn({ status_code: 0 }), true);
+  assert.equal(isCreatorTaskApiLoggedIn({ base_resp: { status_code: 11001 } }), false);
+});
+
+test("creator login probe uses a real mission ID when Xingtu tasks exist", () => {
+  assert.equal(getCreatorLoginProbeMissionId({ mission_cards: [{ id_str: "mission-123" }] }), "mission-123");
+  assert.equal(getCreatorLoginProbeMissionId({ mission_cards: [] }), null);
 });
 
 test("mapWithConcurrency caps concurrent work and preserves all results", async () => {
