@@ -31,10 +31,10 @@ const CHROME_CANDIDATE_PATHS = [
   path.join(process.env.LOCALAPPDATA ?? "", "Google\\Chrome\\Application\\chrome.exe")
 ].filter((value): value is string => Boolean(value));
 
-type LoginState = {
-  loggedIn: boolean;
-  message: string;
-};
+export type LoginProbeState =
+  | { status: "logged_in"; message: string }
+  | { status: "logged_out"; message: string }
+  | { status: "unavailable"; error: unknown; message: string };
 
 type MissionCard = {
   id_str?: string;
@@ -166,6 +166,25 @@ export class FetchRequestError extends Error {
 }
 
 export class PlatformTemporaryError extends Error {}
+
+export function classifyLoginProbeFailure(error: unknown): LoginProbeState {
+  if (error instanceof SessionExpiredError) {
+    return {
+      status: "logged_out",
+      message: toUserErrorMessage(error)
+    };
+  }
+
+  return {
+    status: "unavailable",
+    error,
+    message: toUserErrorMessage(error)
+  };
+}
+
+export function getSyncFailureLoginStatus(currentLoginStatus: string, error: unknown): string {
+  return error instanceof SessionExpiredError ? "expired" : currentLoginStatus;
+}
 
 export class RequestLimiter {
   private activeCount = 0;
@@ -635,7 +654,7 @@ export function getCreatorLoginProbeMissionId(payload: MissionListPayload): stri
   return normalizeText(payload.mission_cards?.find((mission) => mission.id_str)?.id_str);
 }
 
-async function probeCreatorLogin(page: Page, limiter?: RequestLimiter): Promise<LoginState> {
+async function probeCreatorLogin(page: Page, limiter?: RequestLimiter): Promise<LoginProbeState> {
   try {
     const probeUrl = new URL(TASK_LIST_API);
     probeUrl.searchParams.set("cursor", "0");
@@ -647,7 +666,7 @@ async function probeCreatorLogin(page: Page, limiter?: RequestLimiter): Promise<
 
     if (!isCreatorTaskApiLoggedIn(payload)) {
       return {
-        loggedIn: false,
+        status: "logged_out",
         message: apiMessage ?? "创作者中心未登录，请扫码登录"
       };
     }
@@ -660,21 +679,21 @@ async function probeCreatorLogin(page: Page, limiter?: RequestLimiter): Promise<
     }
 
     return {
-      loggedIn: true,
+      status: "logged_in",
       message: "创作者中心和星图任务接口均已登录"
     };
   } catch (error) {
-    return {
-      loggedIn: false,
-      message: toUserErrorMessage(error)
-    };
+    return classifyLoginProbeFailure(error);
   }
 }
 
 async function ensureLoggedIn(page: Page, limiter?: RequestLimiter) {
   const state = await probeCreatorLogin(page, limiter);
-  if (!state.loggedIn) {
+  if (state.status === "logged_out") {
     throw new SessionExpiredError(state.message);
+  }
+  if (state.status === "unavailable") {
+    throw state.error;
   }
 }
 
@@ -755,9 +774,13 @@ export class ScraperService {
         `[scraper] synced account=${accountId} total_ms=${Date.now() - startedAt} work_videos_ms=${payload.metrics.workVideosMs} task_cards_ms=${payload.metrics.taskCardsMs} task_details_ms=${payload.metrics.taskDetailsMs} tasks=${payload.tasks.length} videos=${payload.videos.length} requests=${payload.metrics.requestCount} retries=${payload.metrics.retryCount}`
       );
     } catch (error) {
+      const errorMessage = toUserErrorMessage(error);
       this.db.updateAccountStatus(accountId, {
-        loginStatus: error instanceof SessionExpiredError ? "expired" : "error",
-        lastError: toUserErrorMessage(error)
+        loginStatus: getSyncFailureLoginStatus(account.loginStatus, error),
+        lastError:
+          error instanceof SessionExpiredError
+            ? errorMessage
+            : `\u540c\u6b65\u5931\u8d25\uff0c\u5df2\u4fdd\u7559\u767b\u5f55\u72b6\u6001\uff0c\u5c06\u5728\u4e0b\u6b21\u81ea\u52a8\u540c\u6b65\u91cd\u8bd5\uff1a${errorMessage}`
       });
       throw error;
     }
@@ -791,7 +814,7 @@ export class ScraperService {
 
     while (Date.now() - startedAt < 5 * 60 * 1000) {
       const state = await probeCreatorLogin(page, this.requestLimiter);
-      if (state.loggedIn) {
+      if (state.status === "logged_in") {
         return;
       }
 

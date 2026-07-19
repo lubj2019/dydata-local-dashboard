@@ -21,6 +21,7 @@ const loginStatusLabels: Record<string, string> = {
   never_logged_in: "未登录",
   waiting_scan: "等待扫码",
   active: "已登录",
+  session_recheck_pending: "等待自动复核",
   expired: "登录失效",
   error: "登录异常"
 };

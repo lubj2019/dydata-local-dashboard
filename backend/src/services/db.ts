@@ -58,6 +58,10 @@ export class AppDatabase {
     return sessionsDir;
   }
 
+  close() {
+    this.db.close();
+  }
+
   private initialize() {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS accounts (
@@ -122,6 +126,11 @@ export class AppDatabase {
         PRIMARY KEY (snapshot_date, task_id),
         FOREIGN KEY (account_id) REFERENCES accounts(id)
       );
+
+      CREATE TABLE IF NOT EXISTS app_migrations (
+        name TEXT PRIMARY KEY,
+        applied_at TEXT NOT NULL
+      );
     `);
 
     this.ensureColumn("xingtu_tasks", "mission_id", "TEXT");
@@ -148,6 +157,21 @@ export class AppDatabase {
       SET opening_predicted_amount = predicted_amount
       WHERE opening_predicted_amount IS NULL
     `);
+    this.applyMigration("queue_existing_expired_accounts_for_session_recheck", () => {
+      this.db.prepare(`UPDATE accounts SET login_status = 'session_recheck_pending' WHERE login_status = 'expired'`).run();
+    });
+  }
+
+  private applyMigration(name: string, apply: () => void) {
+    const exists = this.db.prepare(`SELECT 1 FROM app_migrations WHERE name = ?`).get(name);
+    if (exists) {
+      return;
+    }
+
+    this.db.transaction(() => {
+      apply();
+      this.db.prepare(`INSERT INTO app_migrations (name, applied_at) VALUES (?, ?)`).run(name, new Date().toISOString());
+    })();
   }
 
   private ensureColumn(tableName: string, columnName: string, definition: string) {

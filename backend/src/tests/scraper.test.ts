@@ -1,15 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  classifyLoginProbeFailure,
   FetchRequestError,
   findPlatformLoginError,
   getCreatorLoginProbeMissionId,
+  getSyncFailureLoginStatus,
   isCreatorTaskApiLoggedIn,
   isRetryableFetchError,
   mapWithConcurrency,
   PlatformTemporaryError,
   RequestLimiter,
-  retryFetch
+  retryFetch,
+  SessionExpiredError
 } from "../services/scraper.js";
 
 test("findPlatformLoginError detects Xingtu login failures", () => {
@@ -17,6 +20,21 @@ test("findPlatformLoginError detects Xingtu login failures", () => {
 
   assert.equal(findPlatformLoginError({ base_resp: { status_message: message } }), message);
   assert.equal(findPlatformLoginError({ status_message: "Internal system error.[request-id]" }), null);
+});
+
+test("login probes keep network failures distinct from logged-out sessions", () => {
+  const networkError = new Error("net::ERR_INTERNET_DISCONNECTED");
+  const networkState = classifyLoginProbeFailure(networkError);
+  const expiredState = classifyLoginProbeFailure(new SessionExpiredError("login expired"));
+
+  assert.equal(networkState.status, "unavailable");
+  assert.equal(expiredState.status, "logged_out");
+});
+
+test("sync failures preserve active and pending session states unless login is confirmed expired", () => {
+  assert.equal(getSyncFailureLoginStatus("active", new Error("network error")), "active");
+  assert.equal(getSyncFailureLoginStatus("session_recheck_pending", new FetchRequestError(503, "https://example.test")), "session_recheck_pending");
+  assert.equal(getSyncFailureLoginStatus("active", new SessionExpiredError("login expired")), "expired");
 });
 
 test("creator login probe accepts an authenticated creator task API response", () => {

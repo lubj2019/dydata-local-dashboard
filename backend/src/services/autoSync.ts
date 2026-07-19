@@ -42,7 +42,7 @@ export type AutoSyncStatus = {
 };
 
 export function isAutoSyncEligibleAccount(account: Pick<AccountRecord, "loginStatus">): boolean {
-  return account.loginStatus === "active";
+  return account.loginStatus === "active" || account.loginStatus === "session_recheck_pending";
 }
 
 export function computeNextDailyRunAt(now: Date, hour: number, minute: number): Date {
