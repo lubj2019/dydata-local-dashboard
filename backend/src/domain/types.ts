@@ -5,6 +5,7 @@ export type MatchSource = "auto" | "manual";
 export type AccountRecord = {
   id: string;
   displayName: string;
+  douyinId: string | null;
   platform: string;
   sessionDir: string;
   loginStatus: string;

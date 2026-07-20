@@ -20,6 +20,7 @@ export function registerAccountRoutes(app: FastifyInstance, db: AppDatabase, scr
     return db.listAccounts().map((account) => ({
       id: account.id,
       displayName: account.displayName,
+      douyinId: account.douyinId,
       platform: account.platform,
       loginStatus: account.loginStatus,
       lastSyncAt: account.lastSyncAt,

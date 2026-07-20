@@ -1,6 +1,7 @@
 export type AccountSummary = {
   id: string;
   displayName: string;
+  douyinId: string | null;
   platform: string;
   loginStatus: string;
   lastSyncAt: string | null;

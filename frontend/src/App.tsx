@@ -1,4 +1,5 @@
 import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from "react";
+import * as XLSX from "xlsx";
 import {
   createAccount,
   deleteAccount,
@@ -420,6 +421,19 @@ export default function App() {
     setDailyEstimateSummary(estimateSummary);
   }
 
+  function handleExportAccounts() {
+    const worksheet = XLSX.utils.aoa_to_sheet([
+      ["账号名称", "抖音号"],
+      ...accounts.map((account) => [account.displayName, account.douyinId ?? ""])
+    ]);
+    worksheet["!cols"] = [{ wch: 24 }, { wch: 20 }];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "账号信息");
+    XLSX.writeFile(workbook, "账号信息.xlsx");
+    setMessage("账号信息已导出");
+  }
+
   async function handleCreateAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!displayName.trim()) {
@@ -594,6 +608,9 @@ export default function App() {
         <div className="panel-header">
           <h2>账号页</h2>
           <div className="panel-actions">
+            <button type="button" className="secondary" onClick={handleExportAccounts} disabled={accounts.length === 0}>
+              导出账号信息
+            </button>
             <button type="button" className="secondary" onClick={() => setAccountPanelCollapsed((current) => !current)}>
               {accountPanelCollapsed ? "展开账号页" : "收起账号页"}
             </button>
@@ -624,6 +641,7 @@ export default function App() {
                 <article key={account.id} className="account-card">
                   <div>
                     <h3>{account.displayName}</h3>
+                    <p>抖音号：{account.douyinId ?? "未同步"}</p>
                     <p>{account.platform}</p>
                   </div>
                   <div className="account-card-body">

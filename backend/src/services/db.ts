@@ -20,6 +20,7 @@ fs.mkdirSync(sessionsDir, { recursive: true });
 type AccountRow = {
   id: string;
   display_name: string;
+  douyin_id: string | null;
   platform: string;
   session_dir: string;
   login_status: string;
@@ -37,6 +38,7 @@ function mapAccount(row: AccountRow): AccountRecord {
   return {
     id: row.id,
     displayName: row.display_name,
+    douyinId: row.douyin_id,
     platform: row.platform,
     sessionDir: row.session_dir,
     loginStatus: row.login_status,
@@ -67,6 +69,7 @@ export class AppDatabase {
       CREATE TABLE IF NOT EXISTS accounts (
         id TEXT PRIMARY KEY,
         display_name TEXT NOT NULL,
+        douyin_id TEXT,
         platform TEXT NOT NULL,
         session_dir TEXT NOT NULL,
         login_status TEXT NOT NULL,
@@ -133,6 +136,7 @@ export class AppDatabase {
       );
     `);
 
+    this.ensureColumn("accounts", "douyin_id", "TEXT");
     this.ensureColumn("xingtu_tasks", "mission_id", "TEXT");
     this.ensureColumn("xingtu_tasks", "mission_estimated_amount", "REAL");
     this.ensureColumn("task_estimate_snapshots", "opening_predicted_amount", "REAL");
@@ -184,7 +188,7 @@ export class AppDatabase {
   listAccounts(): AccountRecord[] {
     const rows = this.db
       .prepare(`
-        SELECT id, display_name, platform, session_dir, login_status, last_sync_at, last_error
+        SELECT id, display_name, douyin_id, platform, session_dir, login_status, last_sync_at, last_error
         FROM accounts
         ORDER BY created_at DESC
       `)
@@ -196,7 +200,7 @@ export class AppDatabase {
   getAccount(accountId: string): AccountRecord | null {
     const row = this.db
       .prepare(`
-        SELECT id, display_name, platform, session_dir, login_status, last_sync_at, last_error
+        SELECT id, display_name, douyin_id, platform, session_dir, login_status, last_sync_at, last_error
         FROM accounts
         WHERE id = ?
       `)
@@ -277,6 +281,21 @@ export class AppDatabase {
         WHERE id = ?
       `)
       .run(displayName, accountId);
+  }
+
+  updateAccountIdentity(accountId: string, identity: { displayName: string | null; douyinId: string | null }) {
+    const current = this.getAccount(accountId);
+    if (!current) {
+      throw new Error("账号不存在");
+    }
+
+    this.db
+      .prepare(`
+        UPDATE accounts
+        SET display_name = COALESCE(?, display_name), douyin_id = COALESCE(?, douyin_id)
+        WHERE id = ?
+      `)
+      .run(identity.displayName, identity.douyinId, accountId);
   }
 
   replaceAccountSyncData(

@@ -34,6 +34,10 @@ test("legacy expired accounts are queued for session recheck exactly once", () =
 
     const migrated = new AppDatabase(databasePath);
     assert.equal(migrated.getAccount("legacy-account")?.loginStatus, "session_recheck_pending");
+    assert.equal(migrated.getAccount("legacy-account")?.douyinId, null);
+    migrated.updateAccountIdentity("legacy-account", { displayName: "updated", douyinId: "66774630268" });
+    assert.equal(migrated.getAccount("legacy-account")?.displayName, "updated");
+    assert.equal(migrated.getAccount("legacy-account")?.douyinId, "66774630268");
     migrated.updateAccountStatus("legacy-account", { loginStatus: "expired" });
     migrated.close();
 

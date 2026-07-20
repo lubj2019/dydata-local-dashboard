@@ -143,6 +143,7 @@ type WorkVideoCandidate = {
 
 type AccountIdentity = {
   displayName: string | null;
+  douyinId: string | null;
 };
 
 type LoggerLike = {
@@ -351,6 +352,15 @@ function normalizeText(value: unknown): string | null {
 
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+export function extractAccountIdentity(text: string): AccountIdentity {
+  const identityMatch = text.match(/抖音\s+([^\n]+)\n抖音号[：:]\s*([^\n]+)/);
+
+  return {
+    displayName: normalizeText(identityMatch?.[1]),
+    douyinId: normalizeText(identityMatch?.[2])
+  };
 }
 
 function parseChineseNumber(value: string | null | undefined): number | null {
@@ -761,9 +771,7 @@ export class ScraperService {
     const startedAt = Date.now();
     try {
       const payload = await this.scrapeCreatorData(account);
-      if (payload.accountIdentity.displayName) {
-        this.db.updateAccountDisplayName(accountId, payload.accountIdentity.displayName);
-      }
+      this.db.updateAccountIdentity(accountId, payload.accountIdentity);
       this.db.replaceAccountSyncData(accountId, payload);
       this.db.updateAccountStatus(accountId, {
         loginStatus: "active",
@@ -801,8 +809,8 @@ export class ScraperService {
       });
 
       const accountIdentity = await this.fetchAccountIdentity(page).catch(() => null);
-      if (accountIdentity?.displayName) {
-        this.db.updateAccountDisplayName(account.id, accountIdentity.displayName);
+      if (accountIdentity) {
+        this.db.updateAccountIdentity(account.id, accountIdentity);
       }
     } finally {
       await context.close();
@@ -877,9 +885,13 @@ export class ScraperService {
           linkMap.set(link.taskId, link.videoId);
         }
       }
+      const pageIdentity = await this.fetchAccountIdentity(page).catch(() => ({ displayName: null, douyinId: null }));
 
       return {
-        accountIdentity: workPayload.accountIdentity,
+        accountIdentity: {
+          displayName: workPayload.accountIdentity.displayName ?? pageIdentity.displayName,
+          douyinId: pageIdentity.douyinId
+        },
         tasks: [...taskMap.values()],
         videos: [...videoMap.values()],
         links: [...linkMap.entries()].map(([taskId, videoId]) => ({ taskId, videoId })),
@@ -1101,13 +1113,8 @@ export class ScraperService {
       cursor = payload.max_cursor;
     }
 
-    if (!displayName) {
-      const fallbackIdentity = await this.fetchAccountIdentity(page);
-      displayName = fallbackIdentity.displayName;
-    }
-
     return {
-      accountIdentity: { displayName },
+      accountIdentity: { displayName, douyinId: null },
       videos
     };
   }
@@ -1170,20 +1177,8 @@ export class ScraperService {
     await page.waitForTimeout(2000);
     await ensureLoggedIn(page, this.requestLimiter);
 
-    const displayName = await page.evaluate(() => {
-      const text = document.body.innerText;
-      const nicknameMatch = text.match(/抖音\s+([^\n]+)\n抖音号：/);
-      if (nicknameMatch?.[1]) {
-        const candidate = nicknameMatch[1].trim();
-        return candidate || null;
-      }
-
-      return null;
-    });
-
-    return {
-      displayName: normalizeText(displayName)
-    };
+    const text = await page.evaluate(() => document.body.innerText);
+    return extractAccountIdentity(text);
   }
 
   private async openPersistentContext(account: AccountRecord, headless: boolean): Promise<BrowserContext> {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   classifyLoginProbeFailure,
+  extractAccountIdentity,
   FetchRequestError,
   findPlatformLoginError,
   getCreatorLoginProbeMissionId,
@@ -14,6 +15,13 @@ import {
   retryFetch,
   SessionExpiredError
 } from "../services/scraper.js";
+
+test("extractAccountIdentity reads the display name and Douyin ID from the creator home page", () => {
+  assert.deepEqual(
+    extractAccountIdentity("抖音\n小陆说剧¹⁸\n抖音号：66774630268\n这个人很懒"),
+    { displayName: "小陆说剧¹⁸", douyinId: "66774630268" }
+  );
+});
 
 test("findPlatformLoginError detects Xingtu login failures", () => {
   const message = "\u7528\u6237\u672a\u767b\u5f55[20260716155022776D3CC6F83B4BE07D02]";
