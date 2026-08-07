@@ -841,6 +841,29 @@ export class AppDatabase {
     } | undefined;
   }
 
+  getLatestUsableDailySnapshot(accountId: string, snapshotDate: string) {
+    return this.db
+      .prepare(`
+        SELECT
+          snapshot_date as snapshotDate,
+          status,
+          source_synced_at as sourceSyncedAt,
+          last_error as lastError
+        FROM daily_account_snapshots
+        WHERE account_id = ?
+          AND snapshot_date <= ?
+          AND status IN ('fresh', 'carried_forward')
+        ORDER BY snapshot_date DESC
+        LIMIT 1
+      `)
+      .get(accountId, snapshotDate) as {
+      snapshotDate: string;
+      status: "fresh" | "carried_forward";
+      sourceSyncedAt: string | null;
+      lastError: string | null;
+    } | undefined;
+  }
+
   saveManualLink(taskId: string, videoId: string) {
     const taskExists = this.db.prepare(`SELECT 1 FROM xingtu_tasks WHERE id = ?`).get(taskId);
     const videoExists = this.db.prepare(`SELECT 1 FROM videos WHERE id = ?`).get(videoId);
