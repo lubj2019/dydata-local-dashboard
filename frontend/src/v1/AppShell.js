@@ -1,6 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { useEffect, useMemo, useState } from "react";
-import { archiveV2Account, createV2Account, getAccounts, getAutoSyncStatus, getDashboardSummary, getTaskVideos, launchV2Login, runV2Sync, syncV2Account } from "../api";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
+import { archiveV2Account, bindV2TaskVideo, createV2Account, getAccounts, getAutoSyncStatus, getDashboardSummary, getV2Tasks, launchV2Login, runV2Sync, syncV2Account } from "../api";
 import { LoginStatusBadge, StatusBadge } from "./StatusBadge";
 import { formatDateTime, formatMoney, formatNumber, formatSignedMoney, getShanghaiDate } from "./format";
 import "./v1.css";
@@ -52,7 +53,7 @@ export default function AppShell() {
         try {
             const [accounts, rows, dashboard, sync] = await Promise.all([
                 getAccounts(),
-                getTaskVideos({}),
+                getV2Tasks(),
                 getDashboardSummary(),
                 getAutoSyncStatus()
             ]);
@@ -106,7 +107,7 @@ export default function AppShell() {
                                                     .map((account) => {
                                                     const freshness = getFreshness(account.lastSyncAt);
                                                     return (_jsxs("button", { type: "button", className: "v1-queue-item", onClick: () => setPage("accounts"), children: [_jsx("span", { children: account.displayName }), _jsx("small", { children: account.lastError || `最后同步 ${formatDateTime(account.lastSyncAt)}` }), _jsx(StatusBadge, { ...freshness })] }, account.id));
-                                                }) })), _jsxs("div", { className: "v1-section-header", children: [_jsxs("div", { children: [_jsx("h2", { children: "\u4EFB\u52A1\u589E\u91CF\u6392\u884C" }), _jsx("span", { children: "\u5F53\u524D\u540C\u6B65\u6570\u636E" })] }), _jsx("button", { type: "button", className: "v1-text-action", onClick: () => setPage("tasks"), children: "\u67E5\u770B\u4EFB\u52A1" })] }), _jsx(TaskTable, { rows: insights.rankedTasks.slice(0, 8), onSelect: setSelectedTask, compact: true })] })) : null, page === "accounts" ? _jsx(AccountsTable, { accounts: data.accounts, onRefresh: () => void refresh() }) : null, page === "tasks" ? _jsx(TaskTable, { rows: data.rows, onSelect: setSelectedTask }) : null, page === "videos" ? _jsx(VideoTable, { rows: data.rows, onSelect: setSelectedTask }) : null, page === "analytics" ? _jsx(AnalyticsState, { summary: summary }) : null] }), _jsx("aside", { className: "v1-drawer", "aria-label": "\u8BE6\u60C5", children: drawerTask ? (_jsxs(_Fragment, { children: [_jsx("span", { className: "v1-drawer-label", children: "\u4EFB\u52A1\u8BE6\u60C5" }), _jsx("h2", { children: drawerTask.taskName }), _jsx("p", { children: drawerTask.accountName }), _jsxs("dl", { children: [_jsxs("div", { children: [_jsx("dt", { children: "\u5F53\u524D\u9884\u4F30" }), _jsx("dd", { children: formatMoney(getTaskEstimate(drawerTask)) })] }), _jsxs("div", { children: [_jsx("dt", { children: "\u6628\u65E5\u9884\u4F30" }), _jsx("dd", { children: formatMoney(drawerTask.yesterdayTaskPredictedAmount) })] }), _jsxs("div", { children: [_jsx("dt", { children: "\u4ECA\u65E5\u589E\u91CF" }), _jsx("dd", { children: formatSignedMoney(drawerTask.todayPredictedDelta) })] }), _jsxs("div", { children: [_jsx("dt", { children: "\u5B9E\u9645\u64AD\u653E" }), _jsx("dd", { children: formatNumber(drawerTask.actualPlayCount) })] }), _jsxs("div", { children: [_jsx("dt", { children: "\u6700\u540E\u540C\u6B65" }), _jsx("dd", { children: formatDateTime(drawerTask.lastSyncedAt) })] })] })] })) : (_jsxs(_Fragment, { children: [_jsx("span", { className: "v1-drawer-label", children: "\u6570\u636E\u72B6\u6001" }), _jsx("h2", { children: summary?.isComplete ? "数据已就绪" : "等待补全" }), _jsxs("dl", { children: [_jsxs("div", { children: [_jsx("dt", { children: "\u65B0\u9C9C\u5FEB\u7167" }), _jsx("dd", { children: formatNumber(summary?.freshAccountCount) })] }), _jsxs("div", { children: [_jsx("dt", { children: "\u6CBF\u7528\u5FEB\u7167" }), _jsx("dd", { children: formatNumber(summary?.carriedForwardAccountCount) })] }), _jsxs("div", { children: [_jsx("dt", { children: "\u7F3A\u5931\u8D26\u53F7" }), _jsx("dd", { children: formatNumber(summary?.missingAccountCount) })] }), _jsxs("div", { children: [_jsx("dt", { children: "\u81EA\u52A8\u540C\u6B65" }), _jsx("dd", { children: data.sync?.isRunning ? "进行中" : "空闲" })] })] })] })) })] })] })] }));
+                                                }) })), _jsxs("div", { className: "v1-section-header", children: [_jsxs("div", { children: [_jsx("h2", { children: "\u4EFB\u52A1\u589E\u91CF\u6392\u884C" }), _jsx("span", { children: "\u5F53\u524D\u540C\u6B65\u6570\u636E" })] }), _jsx("button", { type: "button", className: "v1-text-action", onClick: () => setPage("tasks"), children: "\u67E5\u770B\u4EFB\u52A1" })] }), _jsx(TaskTable, { rows: insights.rankedTasks.slice(0, 8), onSelect: setSelectedTask, compact: true })] })) : null, page === "accounts" ? _jsx(AccountsTable, { accounts: data.accounts, onRefresh: () => void refresh() }) : null, page === "tasks" ? _jsx(TaskPage, { rows: data.rows, accounts: data.accounts, onSelect: setSelectedTask, onRefresh: () => void refresh() }) : null, page === "videos" ? _jsx(VideoTable, { rows: data.rows, onSelect: setSelectedTask }) : null, page === "analytics" ? _jsx(AnalyticsState, { summary: summary }) : null] }), _jsx("aside", { className: "v1-drawer", "aria-label": "\u8BE6\u60C5", children: drawerTask ? (_jsxs(_Fragment, { children: [_jsx("span", { className: "v1-drawer-label", children: "\u4EFB\u52A1\u8BE6\u60C5" }), _jsx("h2", { children: drawerTask.taskName }), _jsx("p", { children: drawerTask.accountName }), _jsxs("dl", { children: [_jsxs("div", { children: [_jsx("dt", { children: "\u5F53\u524D\u9884\u4F30" }), _jsx("dd", { children: formatMoney(getTaskEstimate(drawerTask)) })] }), _jsxs("div", { children: [_jsx("dt", { children: "\u6628\u65E5\u9884\u4F30" }), _jsx("dd", { children: formatMoney(drawerTask.yesterdayTaskPredictedAmount) })] }), _jsxs("div", { children: [_jsx("dt", { children: "\u4ECA\u65E5\u589E\u91CF" }), _jsx("dd", { children: formatSignedMoney(drawerTask.todayPredictedDelta) })] }), _jsxs("div", { children: [_jsx("dt", { children: "\u5B9E\u9645\u64AD\u653E" }), _jsx("dd", { children: formatNumber(drawerTask.actualPlayCount) })] }), _jsxs("div", { children: [_jsx("dt", { children: "\u6700\u540E\u540C\u6B65" }), _jsx("dd", { children: formatDateTime(drawerTask.lastSyncedAt) })] })] })] })) : (_jsxs(_Fragment, { children: [_jsx("span", { className: "v1-drawer-label", children: "\u6570\u636E\u72B6\u6001" }), _jsx("h2", { children: summary?.isComplete ? "数据已就绪" : "等待补全" }), _jsxs("dl", { children: [_jsxs("div", { children: [_jsx("dt", { children: "\u65B0\u9C9C\u5FEB\u7167" }), _jsx("dd", { children: formatNumber(summary?.freshAccountCount) })] }), _jsxs("div", { children: [_jsx("dt", { children: "\u6CBF\u7528\u5FEB\u7167" }), _jsx("dd", { children: formatNumber(summary?.carriedForwardAccountCount) })] }), _jsxs("div", { children: [_jsx("dt", { children: "\u7F3A\u5931\u8D26\u53F7" }), _jsx("dd", { children: formatNumber(summary?.missingAccountCount) })] }), _jsxs("div", { children: [_jsx("dt", { children: "\u81EA\u52A8\u540C\u6B65" }), _jsx("dd", { children: data.sync?.isRunning ? "进行中" : "空闲" })] })] })] })) })] })] })] }));
 }
 function AccountsTable({ accounts, onRefresh }) {
     const [displayName, setDisplayName] = useState("");
@@ -140,6 +141,87 @@ function AccountsTable({ accounts, onRefresh }) {
                                 const freshness = getFreshness(account.lastSyncAt);
                                 return _jsxs("tr", { children: [_jsx("td", { children: account.displayName }), _jsx("td", { children: account.douyinId ?? "--" }), _jsx("td", { children: _jsx(LoginStatusBadge, { status: account.loginStatus }) }), _jsx("td", { children: formatDateTime(account.lastSyncAt) }), _jsx("td", { children: _jsx(StatusBadge, { ...freshness }) }), _jsx("td", { className: "v1-cell-error", children: account.lastError ?? "--" }), _jsx("td", { children: _jsxs("div", { className: "v1-row-actions", children: [_jsx("button", { type: "button", onClick: () => void run(() => launchV2Login(account.id), account.id, "登录窗口已启动"), disabled: busyId !== null, children: "\u767B\u5F55" }), _jsx("button", { type: "button", onClick: () => void run(() => syncV2Account(account.id), account.id, "同步已完成"), disabled: busyId !== null, children: "\u540C\u6B65" }), _jsx("button", { type: "button", className: "v1-button-secondary", onClick: () => void run(() => archiveV2Account(account.id), account.id, "账号已归档"), disabled: busyId !== null, children: "\u5F52\u6863" })] }) })] }, account.id);
                             }) })] }) }))] }));
+}
+function TaskPage({ rows, accounts, onSelect, onRefresh }) {
+    const [accountId, setAccountId] = useState("");
+    const [status, setStatus] = useState("");
+    const [sort, setSort] = useState("delta");
+    const [expanded, setExpanded] = useState({});
+    const [busyId, setBusyId] = useState(null);
+    const [message, setMessage] = useState(null);
+    const statuses = useMemo(() => [...new Set(rows.map((row) => row.taskStatus))].sort((left, right) => left.localeCompare(right)), [rows]);
+    const groups = useMemo(() => {
+        const grouped = new Map();
+        for (const row of rows) {
+            if (accountId && row.accountId !== accountId)
+                continue;
+            if (status && row.taskStatus !== status)
+                continue;
+            const items = grouped.get(row.taskId) ?? [];
+            items.push(row);
+            grouped.set(row.taskId, items);
+        }
+        const result = [...grouped.values()].map((items) => {
+            const task = items[0];
+            const actualValues = items.map((item) => item.actualPlayCount).filter((value) => value !== null);
+            const deltaValues = items.map((item) => item.playDelta).filter((value) => value !== null);
+            return {
+                task,
+                videos: items.filter((item) => item.videoId),
+                actualPlayCount: actualValues.length ? actualValues.reduce((sum, value) => sum + value, 0) : null,
+                playDelta: deltaValues.length ? deltaValues.reduce((sum, value) => sum + value, 0) : null
+            };
+        });
+        return result.sort((left, right) => {
+            const leftValue = sort === "delta" ? left.task.todayPredictedDelta : sort === "estimate" ? getTaskEstimate(left.task) : left.playDelta;
+            const rightValue = sort === "delta" ? right.task.todayPredictedDelta : sort === "estimate" ? getTaskEstimate(right.task) : right.playDelta;
+            return (rightValue ?? -Infinity) - (leftValue ?? -Infinity) || left.task.taskName.localeCompare(right.task.taskName, "zh-CN");
+        });
+    }, [accountId, rows, sort, status]);
+    function toggle(taskId) {
+        setExpanded((current) => ({ ...current, [taskId]: !current[taskId] }));
+    }
+    function exportRows() {
+        const output = groups.map(({ task, actualPlayCount, playDelta, videos }) => [
+            task.accountName,
+            task.taskName,
+            task.taskStatus,
+            getTaskEstimate(task),
+            task.yesterdayTaskPredictedAmount,
+            task.todayPredictedDelta,
+            task.xingtuPlayCount,
+            actualPlayCount,
+            playDelta,
+            task.settledAmount,
+            task.lastSyncedAt,
+            videos.length
+        ]);
+        const worksheet = XLSX.utils.aoa_to_sheet([["账号", "任务名称", "任务状态", "当前预估", "昨日预估", "今日增量", "任务播放量", "实际播放量", "播放差值", "已发放金额", "最后同步时间", "视频数"], ...output]);
+        worksheet["!cols"] = [{ wch: 18 }, { wch: 28 }, { wch: 14 }, ...Array.from({ length: 9 }, () => ({ wch: 16 }))];
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "任务分析");
+        XLSX.writeFile(workbook, "任务分析.xlsx");
+        setMessage("当前筛选结果已导出");
+    }
+    async function bindVideo(taskId) {
+        const videoId = window.prompt("输入要绑定的视频 ID");
+        if (!videoId?.trim())
+            return;
+        setBusyId(taskId);
+        setMessage(null);
+        try {
+            await bindV2TaskVideo(taskId, videoId.trim());
+            setMessage("视频已绑定");
+            onRefresh();
+        }
+        catch (error) {
+            setMessage(error instanceof Error ? error.message : "视频绑定失败");
+        }
+        finally {
+            setBusyId(null);
+        }
+    }
+    return (_jsxs(_Fragment, { children: [_jsxs("div", { className: "v1-section-header v1-task-toolbar", children: [_jsxs("div", { children: [_jsx("h2", { children: "\u4EFB\u52A1\u5206\u6790" }), _jsx("span", { children: "\u5F52\u6863\u8D26\u53F7\u9ED8\u8BA4\u9690\u85CF\uFF0C\u6570\u636E\u4ECD\u4FDD\u7559\u5728\u603B\u89C8\u7EDF\u8BA1\u4E2D" })] }), _jsxs("div", { className: "v1-filter-actions", children: [_jsxs("select", { "aria-label": "\u8D26\u53F7\u7B5B\u9009", value: accountId, onChange: (event) => setAccountId(event.target.value), children: [_jsx("option", { value: "", children: "\u5168\u90E8\u8D26\u53F7" }), accounts.map((account) => _jsx("option", { value: account.id, children: account.displayName }, account.id))] }), _jsxs("select", { "aria-label": "\u4EFB\u52A1\u72B6\u6001\u7B5B\u9009", value: status, onChange: (event) => setStatus(event.target.value), children: [_jsx("option", { value: "", children: "\u5168\u90E8\u72B6\u6001" }), statuses.map((item) => _jsx("option", { value: item, children: item }, item))] }), _jsxs("select", { "aria-label": "\u4EFB\u52A1\u6392\u5E8F", value: sort, onChange: (event) => setSort(event.target.value), children: [_jsx("option", { value: "delta", children: "\u6309\u589E\u91CF\u6392\u5E8F" }), _jsx("option", { value: "estimate", children: "\u6309\u9884\u4F30\u91D1\u989D\u6392\u5E8F" }), _jsx("option", { value: "play", children: "\u6309\u64AD\u653E\u589E\u957F\u6392\u5E8F" })] }), _jsx("button", { type: "button", className: "v1-button-secondary", onClick: exportRows, disabled: groups.length === 0, children: "\u5BFC\u51FA" })] })] }), message ? _jsx("div", { className: "v1-inline-message", children: message }) : null, groups.length === 0 ? _jsx(EmptyState, { title: "\u6682\u65E0\u7B26\u5408\u6761\u4EF6\u7684\u4EFB\u52A1" }) : (_jsx("div", { className: "v1-table-wrap", children: _jsxs("table", { className: "v1-table v1-task-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "\u8D26\u53F7" }), _jsx("th", { children: "\u4EFB\u52A1\u540D\u79F0" }), _jsx("th", { children: "\u4EFB\u52A1\u72B6\u6001" }), _jsx("th", { children: "\u5F53\u524D\u9884\u4F30" }), _jsx("th", { children: "\u6628\u65E5\u9884\u4F30" }), _jsx("th", { children: "\u4ECA\u65E5\u589E\u91CF" }), _jsx("th", { children: "\u4EFB\u52A1\u64AD\u653E\u91CF" }), _jsx("th", { children: "\u5B9E\u9645\u64AD\u653E\u91CF" }), _jsx("th", { children: "\u64AD\u653E\u5DEE\u503C" }), _jsx("th", { children: "\u5DF2\u53D1\u653E\u91D1\u989D" }), _jsx("th", { children: "\u6700\u540E\u540C\u6B65" }), _jsx("th", { children: "\u64CD\u4F5C" })] }) }), _jsx("tbody", { children: groups.map(({ task, videos, actualPlayCount, playDelta }) => (_jsxs(Fragment, { children: [_jsxs("tr", { onClick: () => onSelect(task), className: "v1-selectable-row", children: [_jsx("td", { children: task.accountName }), _jsx("td", { children: task.taskName }), _jsx("td", { children: _jsx(StatusBadge, { label: task.taskStatus }) }), _jsx("td", { children: formatMoney(getTaskEstimate(task)) }), _jsx("td", { children: formatMoney(task.yesterdayTaskPredictedAmount) }), _jsx("td", { children: formatSignedMoney(task.todayPredictedDelta) }), _jsx("td", { children: formatNumber(task.xingtuPlayCount) }), _jsx("td", { children: formatNumber(actualPlayCount) }), _jsx("td", { children: formatNumber(playDelta) }), _jsx("td", { children: formatMoney(task.settledAmount) }), _jsx("td", { children: formatDateTime(task.lastSyncedAt) }), _jsx("td", { children: _jsxs("div", { className: "v1-row-actions", children: [_jsx("button", { type: "button", className: "v1-button-secondary", onClick: (event) => { event.stopPropagation(); toggle(task.taskId); }, children: expanded[task.taskId] ? "收起" : "视频" }), _jsx("button", { type: "button", onClick: (event) => { event.stopPropagation(); void bindVideo(task.taskId); }, disabled: busyId !== null, children: "\u7ED1\u5B9A" })] }) })] }), expanded[task.taskId] ? _jsx("tr", { children: _jsx("td", { colSpan: 12, children: _jsx("div", { className: "v1-task-details", children: videos.length === 0 ? _jsx("span", { children: "\u6682\u65E0\u5DF2\u7ED1\u5B9A\u89C6\u9891" }) : _jsxs("table", { className: "v1-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "\u89C6\u9891" }), _jsx("th", { children: "\u72B6\u6001" }), _jsx("th", { children: "\u5B9E\u9645\u64AD\u653E" }), _jsx("th", { children: "\u64AD\u653E\u5DEE\u503C" }), _jsx("th", { children: "\u53D1\u5E03\u65F6\u95F4" }), _jsx("th", { children: "\u7ED1\u5B9A\u65B9\u5F0F" })] }) }), _jsx("tbody", { children: videos.map((video) => _jsxs("tr", { children: [_jsx("td", { children: video.videoTitle ?? video.videoId }), _jsx("td", { children: video.videoStatus ?? "--" }), _jsx("td", { children: formatNumber(video.actualPlayCount) }), _jsx("td", { children: formatNumber(video.playDelta) }), _jsx("td", { children: formatDateTime(video.publishedAt) }), _jsx("td", { children: video.matchSource === "manual" ? "手工绑定" : "自动匹配" })] }, `${task.taskId}:${video.videoId}`)) })] }) }) }) }, `${task.taskId}:details`) : null] }, task.taskId))) })] }) }))] }));
 }
 function TaskTable({ rows, onSelect, compact = false }) {
     if (rows.length === 0) {

@@ -105,6 +105,25 @@ export function getTaskVideos(filters: {
   return request<TaskVideoRow[]>(`/api/task-videos${query ? `?${query}` : ""}`);
 }
 
+export function getV2Tasks(filters: { accountId?: string; status?: string } = {}): Promise<TaskVideoRow[]> {
+  const params = new URLSearchParams();
+  if (filters.accountId) {
+    params.set("accountId", filters.accountId);
+  }
+  if (filters.status) {
+    params.set("status", filters.status);
+  }
+  const query = params.toString();
+  return request<TaskVideoRow[]>(`/api/v2/tasks${query ? `?${query}` : ""}`);
+}
+
+export function bindV2TaskVideo(taskId: string, videoId: string): Promise<{ status: string }> {
+  return request<{ status: string }>(`/api/v2/tasks/${taskId}/video-link`, {
+    method: "POST",
+    body: JSON.stringify({ videoId })
+  });
+}
+
 export function getTaskPlayGrowth(page: number): Promise<TaskPlayGrowthPage> {
   return request<TaskPlayGrowthPage>(`/api/task-play-growth?page=${page}`);
 }

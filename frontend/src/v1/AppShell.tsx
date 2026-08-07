@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { archiveV2Account, createV2Account, getAccounts, getAutoSyncStatus, getDashboardSummary, getTaskVideos, launchV2Login, runV2Sync, syncV2Account } from "../api";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
+import { archiveV2Account, bindV2TaskVideo, createV2Account, getAccounts, getAutoSyncStatus, getDashboardSummary, getV2Tasks, launchV2Login, runV2Sync, syncV2Account } from "../api";
 import type { AccountSummary, AutoSyncStatus, DashboardSummary, DailyEstimateSummary, TaskVideoRow } from "../types";
 import { LoginStatusBadge, StatusBadge } from "./StatusBadge";
 import { formatDateTime, formatMoney, formatNumber, formatSignedMoney, getShanghaiDate } from "./format";
@@ -77,7 +78,7 @@ export default function AppShell() {
     try {
       const [accounts, rows, dashboard, sync] = await Promise.all([
         getAccounts(),
-        getTaskVideos({}),
+        getV2Tasks(),
         getDashboardSummary(),
         getAutoSyncStatus()
       ]);
@@ -223,7 +224,7 @@ export default function AppShell() {
             ) : null}
 
             {page === "accounts" ? <AccountsTable accounts={data.accounts} onRefresh={() => void refresh()} /> : null}
-            {page === "tasks" ? <TaskTable rows={data.rows} onSelect={setSelectedTask} /> : null}
+            {page === "tasks" ? <TaskPage rows={data.rows} accounts={data.accounts} onSelect={setSelectedTask} onRefresh={() => void refresh()} /> : null}
             {page === "videos" ? <VideoTable rows={data.rows} onSelect={setSelectedTask} /> : null}
             {page === "analytics" ? <AnalyticsState summary={summary} /> : null}
           </section>
@@ -303,6 +304,152 @@ function AccountsTable({ accounts, onRefresh }: { accounts: AccountSummary[]; on
             const freshness = getFreshness(account.lastSyncAt);
             return <tr key={account.id}><td>{account.displayName}</td><td>{account.douyinId ?? "--"}</td><td><LoginStatusBadge status={account.loginStatus} /></td><td>{formatDateTime(account.lastSyncAt)}</td><td><StatusBadge {...freshness} /></td><td className="v1-cell-error">{account.lastError ?? "--"}</td><td><div className="v1-row-actions"><button type="button" onClick={() => void run(() => launchV2Login(account.id), account.id, "登录窗口已启动")} disabled={busyId !== null}>登录</button><button type="button" onClick={() => void run(() => syncV2Account(account.id), account.id, "同步已完成")} disabled={busyId !== null}>同步</button><button type="button" className="v1-button-secondary" onClick={() => void run(() => archiveV2Account(account.id), account.id, "账号已归档")} disabled={busyId !== null}>归档</button></div></td></tr>;
           })}
+        </tbody></table></div>
+      )}
+    </>
+  );
+}
+
+type TaskSort = "delta" | "estimate" | "play";
+
+type TaskGroupRow = {
+  task: TaskVideoRow;
+  videos: TaskVideoRow[];
+  actualPlayCount: number | null;
+  playDelta: number | null;
+};
+
+function TaskPage({
+  rows,
+  accounts,
+  onSelect,
+  onRefresh
+}: {
+  rows: TaskVideoRow[];
+  accounts: AccountSummary[];
+  onSelect: (row: TaskVideoRow) => void;
+  onRefresh: () => void;
+}) {
+  const [accountId, setAccountId] = useState("");
+  const [status, setStatus] = useState("");
+  const [sort, setSort] = useState<TaskSort>("delta");
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const statuses = useMemo(
+    () => [...new Set(rows.map((row) => row.taskStatus))].sort((left, right) => left.localeCompare(right)),
+    [rows]
+  );
+  const groups = useMemo(() => {
+    const grouped = new Map<string, TaskVideoRow[]>();
+    for (const row of rows) {
+      if (accountId && row.accountId !== accountId) continue;
+      if (status && row.taskStatus !== status) continue;
+      const items = grouped.get(row.taskId) ?? [];
+      items.push(row);
+      grouped.set(row.taskId, items);
+    }
+
+    const result: TaskGroupRow[] = [...grouped.values()].map((items) => {
+      const task = items[0]!;
+      const actualValues = items.map((item) => item.actualPlayCount).filter((value): value is number => value !== null);
+      const deltaValues = items.map((item) => item.playDelta).filter((value): value is number => value !== null);
+      return {
+        task,
+        videos: items.filter((item) => item.videoId),
+        actualPlayCount: actualValues.length ? actualValues.reduce((sum, value) => sum + value, 0) : null,
+        playDelta: deltaValues.length ? deltaValues.reduce((sum, value) => sum + value, 0) : null
+      };
+    });
+
+    return result.sort((left, right) => {
+      const leftValue = sort === "delta" ? left.task.todayPredictedDelta : sort === "estimate" ? getTaskEstimate(left.task) : left.playDelta;
+      const rightValue = sort === "delta" ? right.task.todayPredictedDelta : sort === "estimate" ? getTaskEstimate(right.task) : right.playDelta;
+      return (rightValue ?? -Infinity) - (leftValue ?? -Infinity) || left.task.taskName.localeCompare(right.task.taskName, "zh-CN");
+    });
+  }, [accountId, rows, sort, status]);
+
+  function toggle(taskId: string) {
+    setExpanded((current) => ({ ...current, [taskId]: !current[taskId] }));
+  }
+
+  function exportRows() {
+    const output = groups.map(({ task, actualPlayCount, playDelta, videos }) => [
+      task.accountName,
+      task.taskName,
+      task.taskStatus,
+      getTaskEstimate(task),
+      task.yesterdayTaskPredictedAmount,
+      task.todayPredictedDelta,
+      task.xingtuPlayCount,
+      actualPlayCount,
+      playDelta,
+      task.settledAmount,
+      task.lastSyncedAt,
+      videos.length
+    ]);
+    const worksheet = XLSX.utils.aoa_to_sheet([["账号", "任务名称", "任务状态", "当前预估", "昨日预估", "今日增量", "任务播放量", "实际播放量", "播放差值", "已发放金额", "最后同步时间", "视频数"], ...output]);
+    worksheet["!cols"] = [{ wch: 18 }, { wch: 28 }, { wch: 14 }, ...Array.from({ length: 9 }, () => ({ wch: 16 }))];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "任务分析");
+    XLSX.writeFile(workbook, "任务分析.xlsx");
+    setMessage("当前筛选结果已导出");
+  }
+
+  async function bindVideo(taskId: string) {
+    const videoId = window.prompt("输入要绑定的视频 ID");
+    if (!videoId?.trim()) return;
+    setBusyId(taskId);
+    setMessage(null);
+    try {
+      await bindV2TaskVideo(taskId, videoId.trim());
+      setMessage("视频已绑定");
+      onRefresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "视频绑定失败");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <>
+      <div className="v1-section-header v1-task-toolbar">
+        <div><h2>任务分析</h2><span>归档账号默认隐藏，数据仍保留在总览统计中</span></div>
+        <div className="v1-filter-actions">
+          <select aria-label="账号筛选" value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+            <option value="">全部账号</option>
+            {accounts.map((account) => <option value={account.id} key={account.id}>{account.displayName}</option>)}
+          </select>
+          <select aria-label="任务状态筛选" value={status} onChange={(event) => setStatus(event.target.value)}>
+            <option value="">全部状态</option>
+            {statuses.map((item) => <option value={item} key={item}>{item}</option>)}
+          </select>
+          <select aria-label="任务排序" value={sort} onChange={(event) => setSort(event.target.value as TaskSort)}>
+            <option value="delta">按增量排序</option>
+            <option value="estimate">按预估金额排序</option>
+            <option value="play">按播放增长排序</option>
+          </select>
+          <button type="button" className="v1-button-secondary" onClick={exportRows} disabled={groups.length === 0}>导出</button>
+        </div>
+      </div>
+      {message ? <div className="v1-inline-message">{message}</div> : null}
+      {groups.length === 0 ? <EmptyState title="暂无符合条件的任务" /> : (
+        <div className="v1-table-wrap"><table className="v1-table v1-task-table"><thead><tr><th>账号</th><th>任务名称</th><th>任务状态</th><th>当前预估</th><th>昨日预估</th><th>今日增量</th><th>任务播放量</th><th>实际播放量</th><th>播放差值</th><th>已发放金额</th><th>最后同步</th><th>操作</th></tr></thead><tbody>
+          {groups.map(({ task, videos, actualPlayCount, playDelta }) => (
+            <Fragment key={task.taskId}>
+              <tr onClick={() => onSelect(task)} className="v1-selectable-row">
+                <td>{task.accountName}</td><td>{task.taskName}</td><td><StatusBadge label={task.taskStatus} /></td>
+                <td>{formatMoney(getTaskEstimate(task))}</td><td>{formatMoney(task.yesterdayTaskPredictedAmount)}</td><td>{formatSignedMoney(task.todayPredictedDelta)}</td>
+                <td>{formatNumber(task.xingtuPlayCount)}</td><td>{formatNumber(actualPlayCount)}</td><td>{formatNumber(playDelta)}</td><td>{formatMoney(task.settledAmount)}</td><td>{formatDateTime(task.lastSyncedAt)}</td>
+                <td><div className="v1-row-actions"><button type="button" className="v1-button-secondary" onClick={(event) => { event.stopPropagation(); toggle(task.taskId); }}>{expanded[task.taskId] ? "收起" : "视频"}</button><button type="button" onClick={(event) => { event.stopPropagation(); void bindVideo(task.taskId); }} disabled={busyId !== null}>绑定</button></div></td>
+              </tr>
+              {expanded[task.taskId] ? <tr key={`${task.taskId}:details`}><td colSpan={12}><div className="v1-task-details">
+                {videos.length === 0 ? <span>暂无已绑定视频</span> : <table className="v1-table"><thead><tr><th>视频</th><th>状态</th><th>实际播放</th><th>播放差值</th><th>发布时间</th><th>绑定方式</th></tr></thead><tbody>{videos.map((video) => <tr key={`${task.taskId}:${video.videoId}`}><td>{video.videoTitle ?? video.videoId}</td><td>{video.videoStatus ?? "--"}</td><td>{formatNumber(video.actualPlayCount)}</td><td>{formatNumber(video.playDelta)}</td><td>{formatDateTime(video.publishedAt)}</td><td>{video.matchSource === "manual" ? "手工绑定" : "自动匹配"}</td></tr>)}</tbody></table>}
+              </div></td></tr> : null}
+            </Fragment>
+          ))}
         </tbody></table></div>
       )}
     </>

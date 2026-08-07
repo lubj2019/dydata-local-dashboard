@@ -80,6 +80,23 @@ export function getTaskVideos(filters) {
     const query = params.toString();
     return request(`/api/task-videos${query ? `?${query}` : ""}`);
 }
+export function getV2Tasks(filters = {}) {
+    const params = new URLSearchParams();
+    if (filters.accountId) {
+        params.set("accountId", filters.accountId);
+    }
+    if (filters.status) {
+        params.set("status", filters.status);
+    }
+    const query = params.toString();
+    return request(`/api/v2/tasks${query ? `?${query}` : ""}`);
+}
+export function bindV2TaskVideo(taskId, videoId) {
+    return request(`/api/v2/tasks/${taskId}/video-link`, {
+        method: "POST",
+        body: JSON.stringify({ videoId })
+    });
+}
 export function getTaskPlayGrowth(page) {
     return request(`/api/task-play-growth?page=${page}`);
 }
