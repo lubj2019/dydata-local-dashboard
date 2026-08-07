@@ -6,6 +6,7 @@ import {
   FetchRequestError,
   findPlatformLoginError,
   getCreatorLoginProbeMissionId,
+  getSessionExpiredScopeForUrl,
   getSyncFailureLoginStatus,
   isCreatorTaskApiLoggedIn,
   isRetryableFetchError,
@@ -13,6 +14,7 @@ import {
   PlatformTemporaryError,
   RequestLimiter,
   retryFetch,
+  ScraperService,
   SessionExpiredError
 } from "../services/scraper.js";
 
@@ -33,16 +35,43 @@ test("findPlatformLoginError detects Xingtu login failures", () => {
 test("login probes keep network failures distinct from logged-out sessions", () => {
   const networkError = new Error("net::ERR_INTERNET_DISCONNECTED");
   const networkState = classifyLoginProbeFailure(networkError);
-  const expiredState = classifyLoginProbeFailure(new SessionExpiredError("login expired"));
+  const expiredState = classifyLoginProbeFailure(new SessionExpiredError("login expired", "creator"));
+  const xingtuState = classifyLoginProbeFailure(new SessionExpiredError("not logged in", "xingtu"));
 
   assert.equal(networkState.status, "unavailable");
   assert.equal(expiredState.status, "logged_out");
+  assert.equal(xingtuState.status, "unavailable");
 });
 
-test("sync failures preserve active and pending session states unless login is confirmed expired", () => {
+test("sync failures require Xingtu login without expiring the creator session", () => {
   assert.equal(getSyncFailureLoginStatus("active", new Error("network error")), "active");
   assert.equal(getSyncFailureLoginStatus("session_recheck_pending", new FetchRequestError(503, "https://example.test")), "session_recheck_pending");
-  assert.equal(getSyncFailureLoginStatus("active", new SessionExpiredError("login expired")), "expired");
+  assert.equal(getSyncFailureLoginStatus("active", new SessionExpiredError("not logged in", "xingtu")), "xingtu_login_required");
+  assert.equal(getSyncFailureLoginStatus("active", new SessionExpiredError("login expired", "creator")), "expired");
+  assert.equal(getSessionExpiredScopeForUrl("https://creator.douyin.com/aweme/v1/creator/mission/mine/card/list/"), "creator");
+  assert.equal(getSessionExpiredScopeForUrl("https://creator.douyin.com/web/api/third_party/star/gw/api/challenge/author_get_challenge"), "xingtu");
+});
+
+test("sync automatically starts QR login after a confirmed logged-out response", async () => {
+  const accountId = "account-1";
+  const scraper = new ScraperService({
+    getAccount: () => ({ id: accountId, loginStatus: "active" })
+  } as never);
+  const testableScraper = scraper as unknown as {
+    scrapeCreatorData: () => Promise<never>;
+  };
+  let loginStarts = 0;
+
+  testableScraper.scrapeCreatorData = async () => {
+    throw new SessionExpiredError("not logged in", "xingtu");
+  };
+  scraper.launchLogin = async (receivedAccountId) => {
+    assert.equal(receivedAccountId, accountId);
+    loginStarts += 1;
+  };
+
+  await assert.rejects(() => scraper.syncAccount(accountId), /not logged in/);
+  assert.equal(loginStarts, 1);
 });
 
 test("creator login probe accepts an authenticated creator task API response", () => {

@@ -11,6 +11,8 @@ export type AccountRecord = {
   loginStatus: string;
   lastSyncAt: string | null;
   lastError: string | null;
+  firstLoggedInAt: string | null;
+  archivedAt: string | null;
 };
 
 export type VideoRecord = {
@@ -63,4 +65,20 @@ export type TaskVideoRow = {
   taskStatus: TaskStatus;
   lastSyncedAt: string | null;
   matchSource: MatchSource | null;
+};
+
+export type TaskPlayGrowthRow = {
+  accountName: string;
+  actualPlayCount: number | null;
+  playGrowth: number | null;
+  dailyPlayGrowth: number | null;
+  publishedAt: string | null;
+  taskName: string;
+};
+
+export type TaskPlayGrowthPage = {
+  items: TaskPlayGrowthRow[];
+  page: number;
+  pageSize: number;
+  total: number;
 };

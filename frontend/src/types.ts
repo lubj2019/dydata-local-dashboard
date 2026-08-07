@@ -33,8 +33,14 @@ export type AutoSyncStatus = {
 
 export type DailyEstimateSummary = {
   yesterdayEstimatedTotal: number | null;
-  todayEstimatedTotal: number;
+  todayEstimatedTotal: number | null;
   dailyIncrease: number | null;
+  snapshotDate: string;
+  expectedAccountCount: number;
+  freshAccountCount: number;
+  carriedForwardAccountCount: number;
+  missingAccountCount: number;
+  isComplete: boolean;
 };
 
 export type MatchSource = "auto" | "manual" | null;
@@ -62,4 +68,20 @@ export type TaskVideoRow = {
   taskStatus: string;
   lastSyncedAt: string | null;
   matchSource: MatchSource;
+};
+
+export type TaskPlayGrowthRow = {
+  accountName: string;
+  actualPlayCount: number | null;
+  playGrowth: number | null;
+  dailyPlayGrowth: number | null;
+  publishedAt: string | null;
+  taskName: string;
+};
+
+export type TaskPlayGrowthPage = {
+  items: TaskPlayGrowthRow[];
+  page: number;
+  pageSize: number;
+  total: number;
 };

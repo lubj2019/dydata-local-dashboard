@@ -1,4 +1,4 @@
-import type { AccountSummary, AutoSyncStatus, DailyEstimateSummary, TaskVideoRow } from "./types";
+import type { AccountSummary, AutoSyncStatus, DailyEstimateSummary, TaskPlayGrowthPage, TaskVideoRow } from "./types";
 
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
@@ -79,6 +79,10 @@ export function getTaskVideos(filters: {
 
   const query = params.toString();
   return request<TaskVideoRow[]>(`/api/task-videos${query ? `?${query}` : ""}`);
+}
+
+export function getTaskPlayGrowth(page: number): Promise<TaskPlayGrowthPage> {
+  return request<TaskPlayGrowthPage>(`/api/task-play-growth?page=${page}`);
 }
 
 export function bindTaskVideo(taskId: string, videoId: string): Promise<{ status: string }> {

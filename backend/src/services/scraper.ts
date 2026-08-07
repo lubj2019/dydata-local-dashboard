@@ -158,7 +158,13 @@ type ScrapeMetrics = {
   taskDetailsMs: number;
 };
 
-export class SessionExpiredError extends Error {}
+export type SessionExpiredScope = "creator" | "xingtu";
+
+export class SessionExpiredError extends Error {
+  constructor(message: string, readonly scope: SessionExpiredScope = "creator") {
+    super(message);
+  }
+}
 
 export class FetchRequestError extends Error {
   constructor(readonly status: number, url: string) {
@@ -168,8 +174,12 @@ export class FetchRequestError extends Error {
 
 export class PlatformTemporaryError extends Error {}
 
+export function getSessionExpiredScopeForUrl(url: string): SessionExpiredScope {
+  return url.includes("/third_party/star/gw/api/challenge/") ? "xingtu" : "creator";
+}
+
 export function classifyLoginProbeFailure(error: unknown): LoginProbeState {
-  if (error instanceof SessionExpiredError) {
+  if (error instanceof SessionExpiredError && error.scope === "creator") {
     return {
       status: "logged_out",
       message: toUserErrorMessage(error)
@@ -184,7 +194,11 @@ export function classifyLoginProbeFailure(error: unknown): LoginProbeState {
 }
 
 export function getSyncFailureLoginStatus(currentLoginStatus: string, error: unknown): string {
-  return error instanceof SessionExpiredError ? "expired" : currentLoginStatus;
+  if (!(error instanceof SessionExpiredError)) {
+    return currentLoginStatus;
+  }
+
+  return error.scope === "creator" ? "expired" : "xingtu_login_required";
 }
 
 export class RequestLimiter {
@@ -618,7 +632,7 @@ async function fetchLooseJsonOnce(page: Page, url: string): Promise<unknown> {
   const parsed = JSON.parse(payload.text);
   const loginError = findPlatformLoginError(parsed);
   if (loginError) {
-    throw new SessionExpiredError(loginError);
+    throw new SessionExpiredError(loginError, getSessionExpiredScopeForUrl(url));
   }
   const temporaryError = findPlatformTemporaryError(parsed);
   if (temporaryError) {
@@ -763,6 +777,9 @@ export class ScraperService {
     if (!account) {
       throw new Error("账号不存在");
     }
+    if (account.archivedAt) {
+      throw new Error("账号已归档");
+    }
     return account;
   }
 
@@ -783,10 +800,17 @@ export class ScraperService {
       );
     } catch (error) {
       const errorMessage = toUserErrorMessage(error);
+      const loginStatus = getSyncFailureLoginStatus(account.loginStatus, error);
+
+      if (error instanceof SessionExpiredError) {
+        await this.launchLogin(accountId);
+        throw error;
+      }
+
       this.db.updateAccountStatus(accountId, {
-        loginStatus: getSyncFailureLoginStatus(account.loginStatus, error),
+        loginStatus,
         lastError:
-          error instanceof SessionExpiredError
+          loginStatus === "expired" || loginStatus === "xingtu_login_required"
             ? errorMessage
             : `\u540c\u6b65\u5931\u8d25\uff0c\u5df2\u4fdd\u7559\u767b\u5f55\u72b6\u6001\uff0c\u5c06\u5728\u4e0b\u6b21\u81ea\u52a8\u540c\u6b65\u91cd\u8bd5\uff1a${errorMessage}`
       });

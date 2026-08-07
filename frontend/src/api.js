@@ -62,6 +62,9 @@ export function getTaskVideos(filters) {
     const query = params.toString();
     return request(`/api/task-videos${query ? `?${query}` : ""}`);
 }
+export function getTaskPlayGrowth(page) {
+    return request(`/api/task-play-growth?page=${page}`);
+}
 export function bindTaskVideo(taskId, videoId) {
     return request(`/api/task-links/${taskId}/bind`, {
         method: "POST",

@@ -17,6 +17,14 @@ function readVideoId(body: unknown): string {
 export function registerTaskVideoRoutes(app: FastifyInstance, db: AppDatabase) {
   app.get("/api/daily-estimate-summary", async () => db.getDailyEstimateSummary());
 
+  app.get("/api/task-play-growth", async (request) => {
+    const query = request.query as { page?: string };
+    const requestedPage = Number(query.page);
+    const page = Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+
+    return db.listTaskPlayGrowthPage(page, 50);
+  });
+
   app.get("/api/task-videos", async (request) => {
     const query = request.query as { accountId?: string; status?: string };
     const filters: { accountId?: string; status?: string } = {};

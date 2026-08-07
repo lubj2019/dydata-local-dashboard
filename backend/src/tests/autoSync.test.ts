@@ -7,6 +7,7 @@ test("isAutoSyncEligibleAccount skips accounts that have not completed login", (
   assert.equal(isAutoSyncEligibleAccount({ loginStatus: "waiting_scan" }), false);
   assert.equal(isAutoSyncEligibleAccount({ loginStatus: "active" }), true);
   assert.equal(isAutoSyncEligibleAccount({ loginStatus: "session_recheck_pending" }), true);
+  assert.equal(isAutoSyncEligibleAccount({ loginStatus: "xingtu_login_required" }), false);
   assert.equal(isAutoSyncEligibleAccount({ loginStatus: "expired" }), false);
 });
 

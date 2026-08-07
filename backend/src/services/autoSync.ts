@@ -1,4 +1,5 @@
 import type { AccountRecord } from "../domain/types.js";
+import { getShanghaiDateKey } from "../domain/dailyEstimate.js";
 import { AppDatabase } from "./db.js";
 import { ScraperService } from "./scraper.js";
 
@@ -371,6 +372,14 @@ export class AutoSyncService {
       });
 
       await Promise.all(workers);
+
+      if (reason === "daily_retry") {
+        const dailyDate = getShanghaiDateKey(new Date(Date.parse(startedAt) - 60 * 60 * 1000));
+        const coverage = this.db.finalizeDailySnapshots(dailyDate, new Date());
+        this.logger.info(
+          `[auto-sync] finalized daily snapshots date=${dailyDate} expected=${coverage.expected} fresh=${coverage.fresh} carried_forward=${coverage.carriedForward} missing=${coverage.missing}`
+        );
+      }
 
       const finishedAt = new Date().toISOString();
       this.status.lastFinishedAt = finishedAt;

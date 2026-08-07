@@ -24,7 +24,9 @@ export function registerAccountRoutes(app: FastifyInstance, db: AppDatabase, scr
       platform: account.platform,
       loginStatus: account.loginStatus,
       lastSyncAt: account.lastSyncAt,
-      lastError: account.lastError
+      lastError: account.lastError,
+      firstLoggedInAt: account.firstLoggedInAt,
+      archivedAt: account.archivedAt
     }));
   });
 
@@ -61,7 +63,7 @@ export function registerAccountRoutes(app: FastifyInstance, db: AppDatabase, scr
     try {
       const accountId = (request.params as { accountId: string }).accountId;
       db.deleteAccount(accountId);
-      return { status: "deleted" };
+      return { status: "archived" };
     } catch (error) {
       return reply.status(400).send({ message: error instanceof Error ? error.message : "删除账号失败" });
     }

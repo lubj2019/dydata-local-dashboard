@@ -379,6 +379,10 @@ button:disabled {
   min-width: 1120px;
 }
 
+.play-growth-table {
+  min-width: 960px;
+}
+
 .ranking-table tbody > tr:hover:not(.ranking-detail-row) {
   background: #fffaf2;
 }
@@ -411,7 +415,7 @@ button:disabled {
 }
 
 .ranking-video-table {
-  min-width: 760px;
+  min-width: 1440px;
   background: #fff;
 }
 

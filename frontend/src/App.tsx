@@ -6,13 +6,15 @@ import {
   getAccounts,
   getAutoSyncStatus,
   getDailyEstimateSummary,
+  getTaskPlayGrowth,
   getTaskVideos,
   launchLogin,
   runAllSync,
   syncAccount
 } from "./api";
-import type { AccountSummary, AutoSyncStatus, DailyEstimateSummary, TaskVideoRow } from "./types";
+import type { AccountSummary, AutoSyncStatus, DailyEstimateSummary, TaskPlayGrowthPage, TaskVideoRow } from "./types";
 import { formatMoney, isNegativeMoney, isVisibleMoneyChange, normalizeMoney } from "./money";
+import { getTaskEstimatedDelta } from "./ranking";
 import "./styles.css";
 
 const TASK_GROUPS_PER_PAGE = 6;
@@ -23,6 +25,7 @@ const loginStatusLabels: Record<string, string> = {
   waiting_scan: "等待扫码",
   active: "已登录",
   session_recheck_pending: "等待自动复核",
+  xingtu_login_required: "需登录星图",
   expired: "登录失效",
   error: "登录异常"
 };
@@ -175,11 +178,12 @@ function buildGroups(rows: TaskVideoRow[]): AccountGroup[] {
         taskStatus: row.taskStatus,
         lastSyncedAt: row.lastSyncedAt,
         estimatedIncome: row.missionEstimatedAmount,
-        yesterdayEstimatedIncome: row.hasYesterdayTaskBaseline === 1 ? row.yesterdayTaskPredictedAmount : null,
-        todayEstimatedDelta:
-          row.hasYesterdayTaskBaseline === 1 && row.missionEstimatedAmount !== null && row.yesterdayTaskPredictedAmount !== null
-            ? normalizeMoney(row.missionEstimatedAmount - row.yesterdayTaskPredictedAmount)
-            : null,
+        yesterdayEstimatedIncome: row.hasYesterdayTaskBaseline === 1 ? row.yesterdayTaskPredictedAmount : 0,
+        todayEstimatedDelta: getTaskEstimatedDelta(
+          row.missionEstimatedAmount,
+          row.yesterdayTaskPredictedAmount,
+          row.hasYesterdayTaskBaseline === 1
+        ),
         todayPublishedCount: 0,
         hasDailyBaseline: row.hasYesterdayTaskBaseline === 1,
         settledAmountTotal: 0,
@@ -242,7 +246,9 @@ function buildRankingStats(tasks: TaskGroup[], dailyEstimateSummary: DailyEstima
   return {
     updatedTaskCount: changedTasks.length,
     dailyDelta:
-      dailyEstimateSummary?.yesterdayEstimatedTotal === null || dailyEstimateSummary === null
+      dailyEstimateSummary?.yesterdayEstimatedTotal === null ||
+      dailyEstimateSummary?.todayEstimatedTotal === null ||
+      dailyEstimateSummary === null
         ? null
         : normalizeMoney(dailyEstimateSummary.todayEstimatedTotal - dailyEstimateSummary.yesterdayEstimatedTotal),
     updatedAccountCount: new Set(changedTasks.map((task) => task.accountId)).size,
@@ -264,8 +270,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [rankingPage, setRankingPage] = useState(1);
-  const [taskView, setTaskView] = useState<"details" | "ranking">("details");
-  const [expandedRankingTask, setExpandedRankingTask] = useState<string | null>(null);
+  const [playGrowthPage, setPlayGrowthPage] = useState<TaskPlayGrowthPage | null>(null);
+  const [playGrowthCurrentPage, setPlayGrowthCurrentPage] = useState(1);
+  const [taskView, setTaskView] = useState<"details" | "ranking" | "playGrowth">("details");
   const [accountPanelCollapsed, setAccountPanelCollapsed] = useState(true);
   const [collapsedTaskAccounts, setCollapsedTaskAccounts] = useState<Record<string, boolean>>({});
   const [autoSyncStatus, setAutoSyncStatus] = useState<AutoSyncStatus | null>(null);
@@ -344,7 +351,8 @@ export default function App() {
           lastFinishedAtRef.current = status.lastFinishedAt;
         } else if (status.lastFinishedAt && status.lastFinishedAt !== lastFinishedAtRef.current) {
           lastFinishedAtRef.current = status.lastFinishedAt;
-          await refreshAll(selectedAccountId, selectedStatus);
+          setPlayGrowthCurrentPage(1);
+          await refreshAll(selectedAccountId, selectedStatus, 1);
           return;
         }
 
@@ -382,7 +390,6 @@ export default function App() {
   useEffect(() => {
     setCurrentPage(1);
     setRankingPage(1);
-    setExpandedRankingTask(null);
   }, [selectedAccountId, selectedStatus]);
 
   useEffect(() => {
@@ -397,6 +404,16 @@ export default function App() {
     }
   }, [rankingPage, rankingTotalPages]);
 
+  useEffect(() => {
+    if (taskView !== "playGrowth") {
+      return;
+    }
+
+    void refreshPlayGrowth(playGrowthCurrentPage).catch((caught) => {
+      setError(caught instanceof Error ? caught.message : "播放量增长数据加载失败");
+    });
+  }, [playGrowthCurrentPage, taskView]);
+
   async function refreshAccounts() {
     setAccounts(await getAccounts());
   }
@@ -410,7 +427,11 @@ export default function App() {
     setDailyEstimateSummary(estimateSummary);
   }
 
-  async function refreshAll(accountId = selectedAccountId, status = selectedStatus) {
+  async function refreshPlayGrowth(page = playGrowthCurrentPage) {
+    setPlayGrowthPage(await getTaskPlayGrowth(page));
+  }
+
+  async function refreshAll(accountId = selectedAccountId, status = selectedStatus, growthPage = playGrowthCurrentPage) {
     const [accountList, taskRows, estimateSummary] = await Promise.all([
       getAccounts(),
       getTaskVideos({ accountId, status }),
@@ -419,6 +440,9 @@ export default function App() {
     setAccounts(accountList);
     setRows(taskRows);
     setDailyEstimateSummary(estimateSummary);
+    if (taskView === "playGrowth") {
+      await refreshPlayGrowth(growthPage);
+    }
   }
 
   function handleExportAccounts() {
@@ -471,7 +495,8 @@ export default function App() {
     try {
       await syncAccount(accountId);
       setMessage("同步完成");
-      await refreshAll();
+      setPlayGrowthCurrentPage(1);
+      await refreshAll(selectedAccountId, selectedStatus, 1);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "同步失败");
       await refreshAccounts();
@@ -506,7 +531,7 @@ export default function App() {
   }
 
   async function handleDeleteAccount(accountId: string, accountName: string) {
-    const confirmed = window.confirm(`确认删除账号“${accountName}”吗？这会同时删除该账号的本地会话和已采集数据。`);
+    const confirmed = window.confirm(`确认归档账号“${accountName}”吗？这会停止同步并移除当前数据，但会保留全部历史快照。`);
     if (!confirmed) {
       return;
     }
@@ -518,10 +543,10 @@ export default function App() {
       await deleteAccount(accountId);
       const nextAccountId = selectedAccountId === accountId ? "" : selectedAccountId;
       setSelectedAccountId(nextAccountId);
-      setMessage("账号已删除");
+      setMessage("账号已归档");
       await refreshAll(nextAccountId, selectedStatus);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "删除账号失败");
+      setError(caught instanceof Error ? caught.message : "归档账号失败");
     } finally {
       setBusyId(null);
     }
@@ -532,6 +557,13 @@ export default function App() {
     setSelectedStatus(status);
     setError(null);
     await refreshRows(accountId, status);
+  }
+
+  function showTaskView(view: "details" | "ranking" | "playGrowth") {
+    setTaskView(view);
+    if (view === "playGrowth") {
+      setPlayGrowthCurrentPage(1);
+    }
   }
 
   function toggleTaskAccountCollapse(accountId: string) {
@@ -673,7 +705,7 @@ export default function App() {
                         onClick={() => handleDeleteAccount(account.id, account.displayName)}
                         disabled={busyId !== null}
                       >
-                        删除账号
+                        归档账号
                       </button>
                     </div>
                   </div>
@@ -694,16 +726,23 @@ export default function App() {
               <button
                 type="button"
                 className={taskView === "details" ? "active" : ""}
-                onClick={() => setTaskView("details")}
+                onClick={() => showTaskView("details")}
               >
                 任务明细
               </button>
               <button
                 type="button"
                 className={taskView === "ranking" ? "active" : ""}
-                onClick={() => setTaskView("ranking")}
+                onClick={() => showTaskView("ranking")}
               >
                 今日预估排行
+              </button>
+              <button
+                type="button"
+                className={taskView === "playGrowth" ? "active" : ""}
+                onClick={() => showTaskView("playGrowth")}
+              >
+                播放量增长
               </button>
             </div>
             <div className="filters">
@@ -841,7 +880,7 @@ export default function App() {
               </div>
             ) : null}
           </>
-        ) : (
+        ) : taskView === "ranking" ? (
           <>
             <div className="ranking-summary">
               <div>
@@ -892,7 +931,6 @@ export default function App() {
                   <tbody>
                     {pagedRankingTasks.map((task, index) => {
                       const taskKey = `${task.accountId}:${task.missionId}`;
-                      const expanded = expandedRankingTask === taskKey;
 
                       return (
                         <Fragment key={taskKey}>
@@ -909,50 +947,48 @@ export default function App() {
                             </td>
                             <td>{task.todayPublishedCount}</td>
                             <td>{formatTime(task.lastSyncedAt)}</td>
-                            <td>
-                              <button
-                                type="button"
-                                className="secondary compact-button"
-                                onClick={() => setExpandedRankingTask(expanded ? null : taskKey)}
-                              >
-                                {expanded ? "收起" : "展开"}
-                              </button>
+                            <td>视频明细见下方</td>
+                          </tr>
+                          <tr className="ranking-detail-row">
+                            <td colSpan={9}>
+                              <div className="table-wrap">
+                                <table className="ranking-video-table">
+                                  <thead>
+                                    <tr>
+                                      <th>视频标题</th>
+                                      <th>发布时间</th>
+                                      <th>昨日预估</th>
+                                      <th>当前预估</th>
+                                      <th>今日增量</th>
+                                      <th>任务口径播放量</th>
+                                      <th>当前播放量</th>
+                                      <th>播放量差值</th>
+                                      <th>已发放收益</th>
+                                      <th>视频状态</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {task.videos.map((row) => (
+                                      <tr key={row.taskId}>
+                                        <td>{row.videoTitle ?? "--"}</td>
+                                        <td>{formatTime(row.publishedAt)}</td>
+                                        <td>{formatMoney(row.yesterdayPredictedAmount)}</td>
+                                        <td>{formatMoney(row.predictedAmount)}</td>
+                                        <td className={isNegativeMoney(row.todayPredictedDelta) ? "amount-negative" : "amount-positive"}>
+                                          {formatMoney(row.todayPredictedDelta)}
+                                        </td>
+                                        <td>{formatNumber(row.xingtuPlayCount)}</td>
+                                        <td>{formatNumber(row.actualPlayCount)}</td>
+                                        <td>{formatNumber(row.playDelta)}</td>
+                                        <td>{formatMoney(row.settledAmount)}</td>
+                                        <td>{row.videoStatus ? (videoStatusLabels[row.videoStatus] ?? row.videoStatus) : "--"}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
                             </td>
                           </tr>
-                          {expanded ? (
-                            <tr className="ranking-detail-row">
-                              <td colSpan={9}>
-                                <div className="table-wrap">
-                                  <table className="ranking-video-table">
-                                    <thead>
-                                      <tr>
-                                        <th>视频标题</th>
-                                        <th>昨日预估</th>
-                                        <th>当前预估</th>
-                                        <th>今日增量</th>
-                                        <th>当前播放量</th>
-                                        <th>视频状态</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {task.videos.map((row) => (
-                                        <tr key={row.taskId}>
-                                          <td>{row.videoTitle ?? "--"}</td>
-                                          <td>{formatMoney(row.yesterdayPredictedAmount)}</td>
-                                          <td>{formatMoney(row.predictedAmount)}</td>
-                                          <td className={isNegativeMoney(row.todayPredictedDelta) ? "amount-negative" : "amount-positive"}>
-                                            {formatMoney(row.todayPredictedDelta)}
-                                          </td>
-                                          <td>{formatNumber(row.actualPlayCount)}</td>
-                                          <td>{row.videoStatus ? (videoStatusLabels[row.videoStatus] ?? row.videoStatus) : "--"}</td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
-                              </td>
-                            </tr>
-                          ) : null}
                         </Fragment>
                       );
                     })}
@@ -979,6 +1015,69 @@ export default function App() {
                   className="secondary"
                   onClick={() => setRankingPage((page) => Math.min(rankingTotalPages, page + 1))}
                   disabled={rankingPage === rankingTotalPages}
+                >
+                  下一页
+                </button>
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <>
+            {playGrowthPage === null ? (
+              <p className="empty">正在加载播放量增长数据...</p>
+            ) : playGrowthPage.items.length === 0 ? (
+              <p className="empty">当前没有任务播放量数据。</p>
+            ) : (
+              <div className="table-wrap ranking-table-wrap">
+                <table className="play-growth-table">
+                  <thead>
+                    <tr>
+                      <th>账号名称</th>
+                      <th>当前播放量</th>
+                      <th>增长播放量</th>
+                      <th>日增长播放量</th>
+                      <th>视频发布时间</th>
+                      <th>任务名称</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {playGrowthPage.items.map((row, index) => (
+                      <tr key={`${row.accountName}:${row.taskName}:${row.publishedAt ?? ""}:${index}`}>
+                        <td>{row.accountName}</td>
+                        <td>{formatNumber(row.actualPlayCount)}</td>
+                        <td>{formatNumber(row.playGrowth)}</td>
+                        <td>{formatNumber(row.dailyPlayGrowth)}</td>
+                        <td>{formatTime(row.publishedAt)}</td>
+                        <td>{row.taskName}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {playGrowthPage !== null && playGrowthPage.total > playGrowthPage.pageSize ? (
+              <div className="pagination">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setPlayGrowthCurrentPage((page) => Math.max(1, page - 1))}
+                  disabled={playGrowthPage.page === 1}
+                >
+                  上一页
+                </button>
+                <span>
+                  第 {playGrowthPage.page} / {Math.max(1, Math.ceil(playGrowthPage.total / playGrowthPage.pageSize))} 页
+                </span>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() =>
+                    setPlayGrowthCurrentPage((page) =>
+                      Math.min(Math.max(1, Math.ceil(playGrowthPage.total / playGrowthPage.pageSize)), page + 1)
+                    )
+                  }
+                  disabled={playGrowthPage.page >= Math.ceil(playGrowthPage.total / playGrowthPage.pageSize)}
                 >
                   下一页
                 </button>
