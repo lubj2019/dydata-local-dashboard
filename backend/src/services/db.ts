@@ -864,6 +864,34 @@ export class AppDatabase {
     } | undefined;
   }
 
+  applyV1DashboardMigration() {
+    this.applyMigration("v1_dashboard_data_model", () => {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS v1_statistic_retention (
+          account_id TEXT PRIMARY KEY,
+          archived_at TEXT NOT NULL,
+          preserved_at TEXT NOT NULL,
+          FOREIGN KEY (account_id) REFERENCES accounts(id)
+        )
+      `);
+      this.db
+        .prepare(`
+          INSERT INTO v1_statistic_retention (account_id, archived_at, preserved_at)
+          SELECT id, archived_at, ?
+          FROM accounts
+          WHERE archived_at IS NOT NULL
+          ON CONFLICT(account_id) DO NOTHING
+        `)
+        .run(new Date().toISOString());
+    });
+  }
+
+  listV1StatisticRetention() {
+    return this.db
+      .prepare("SELECT account_id as accountId FROM v1_statistic_retention ORDER BY account_id")
+      .all() as Array<{ accountId: string }>;
+  }
+
   saveManualLink(taskId: string, videoId: string) {
     const taskExists = this.db.prepare(`SELECT 1 FROM xingtu_tasks WHERE id = ?`).get(taskId);
     const videoExists = this.db.prepare(`SELECT 1 FROM videos WHERE id = ?`).get(videoId);

@@ -10,6 +10,7 @@ import { registerTaskVideoRoutes } from "./routes/taskVideos.js";
 import { AutoSyncService } from "./services/autoSync.js";
 import { AppDatabase } from "./services/db.js";
 import { ScraperService } from "./services/scraper.js";
+import { completeV1Migration, prepareV1Migration } from "./services/v1Migration.js";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(moduleDir, "..", "..");
@@ -17,7 +18,9 @@ const frontendDistDir = path.join(projectRoot, "frontend", "dist");
 
 export function buildApp() {
   const app = Fastify({ logger: true });
+  prepareV1Migration();
   const db = new AppDatabase();
+  completeV1Migration(db);
   const scraper = new ScraperService(db, app.log);
   const autoSync = new AutoSyncService(db, scraper, app.log);
 
