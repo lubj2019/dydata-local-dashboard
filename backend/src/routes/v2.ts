@@ -32,6 +32,19 @@ export function registerV2Routes(app: FastifyInstance, db: AppDatabase, scraper:
 
   app.get("/api/v2/dashboard/summary", async () => statistics.getDashboardSummary());
 
+  app.get("/api/v2/dashboard/trend", async (request, reply) => {
+    const query = request.query as { days?: string; from?: string; to?: string };
+    try {
+      const options: { days?: number; from?: string; to?: string } = {};
+      if (query.days !== undefined) options.days = Number(query.days);
+      if (query.from !== undefined) options.from = query.from;
+      if (query.to !== undefined) options.to = query.to;
+      return statistics.getDashboardTrend(options);
+    } catch (error) {
+      return reply.status(400).send({ message: error instanceof Error ? error.message : "趋势参数无效" });
+    }
+  });
+
   app.get("/api/v2/dashboard/ranking", async () => {
     const tasks = db.listTaskVideoRows({})
       .sort((left, right) => (right.todayPredictedDelta ?? -Infinity) - (left.todayPredictedDelta ?? -Infinity));

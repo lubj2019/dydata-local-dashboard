@@ -48,6 +48,17 @@ export function getDailyEstimateSummary() {
 export function getDashboardSummary() {
     return request("/api/v2/dashboard/summary");
 }
+export function getDashboardTrend(options = {}) {
+    const params = new URLSearchParams();
+    if (options.days !== undefined)
+        params.set("days", String(options.days));
+    if (options.from)
+        params.set("from", options.from);
+    if (options.to)
+        params.set("to", options.to);
+    const query = params.toString();
+    return request(`/api/v2/dashboard/trend${query ? `?${query}` : ""}`);
+}
 export function createV2Account(displayName) {
     return request("/api/v2/accounts", { method: "POST", body: JSON.stringify({ displayName }) });
 }

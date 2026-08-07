@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
-import { archiveV2Account, bindV2TaskVideo, createV2Account, getAccounts, getAutoSyncStatus, getDashboardSummary, getV2Tasks, launchV2Login, runV2Sync, syncV2Account } from "../api";
-import type { AccountSummary, AutoSyncStatus, DashboardSummary, DailyEstimateSummary, TaskVideoRow } from "../types";
+import { archiveV2Account, bindV2TaskVideo, createV2Account, getAccounts, getAutoSyncStatus, getDashboardSummary, getDashboardTrend, getV2Tasks, launchV2Login, runV2Sync, syncV2Account } from "../api";
+import type { AccountSummary, AutoSyncStatus, DashboardSummary, DashboardTrend, DailyEstimateSummary, TaskVideoRow } from "../types";
 import { LoginStatusBadge, StatusBadge } from "./StatusBadge";
 import { formatDateTime, formatMoney, formatNumber, formatSignedMoney, getShanghaiDate } from "./format";
 import "./v1.css";
@@ -478,5 +478,62 @@ function VideoTable({ rows, onSelect }: { rows: TaskVideoRow[]; onSelect: (row: 
 }
 
 function AnalyticsState({ summary }: { summary: DailyEstimateSummary | null }) {
-  return <div className="v1-analytics-state"><span>当前统计基线</span><strong>{summary?.snapshotDate ?? "--"}</strong><p>{summary?.isComplete ? "昨日最终快照可用于趋势聚合。" : "历史快照仍在补全。"}</p></div>;
+  const [range, setRange] = useState<"7" | "30" | "custom">("7");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState(summary?.snapshotDate ?? "");
+  const [trend, setTrend] = useState<DashboardTrend | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (range !== "custom") {
+      setLoading(true);
+      setError(null);
+      void getDashboardTrend({ days: Number(range) })
+        .then(setTrend)
+        .catch((caught) => setError(caught instanceof Error ? caught.message : "趋势加载失败"))
+        .finally(() => setLoading(false));
+      return;
+    }
+
+    if (!from || !to || from > to) {
+      setTrend(null);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    void getDashboardTrend({ from, to })
+      .then(setTrend)
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "趋势加载失败"))
+      .finally(() => setLoading(false));
+  }, [from, range, to]);
+
+  const maxTotal = Math.max(...(trend?.points.map((point) => point.total ?? 0) ?? [0]), 1);
+  return (
+    <>
+      <div className="v1-section-header v1-analytics-toolbar">
+        <div><h2>历史趋势</h2><span>{trend ? `${trend.from} 至 ${trend.to}` : "选择统计区间"}</span></div>
+        <div className="v1-filter-actions">
+          <select aria-label="趋势区间" value={range} onChange={(event) => setRange(event.target.value as "7" | "30" | "custom")}>
+            <option value="7">近 7 天</option>
+            <option value="30">近 30 天</option>
+            <option value="custom">自定义区间</option>
+          </select>
+          {range === "custom" ? <><input aria-label="趋势开始日期" type="date" value={from} onChange={(event) => setFrom(event.target.value)} /><input aria-label="趋势结束日期" type="date" value={to} onChange={(event) => setTo(event.target.value)} /></> : null}
+        </div>
+      </div>
+      {error ? <div className="v1-alert">{error}</div> : null}
+      {loading ? <div className="v1-empty">加载趋势中...</div> : trend?.points.length ? (
+        <>
+          <div className="v1-trend-chart" aria-label="预估金额趋势">
+            {trend.points.map((point) => <div className="v1-trend-column" key={point.date}><div className={`v1-trend-bar${point.isComplete ? "" : " v1-trend-bar-incomplete"}`} style={{ height: `${point.total === null ? 4 : Math.max(4, (point.total / maxTotal) * 100)}%` }} title={`${point.date}: ${formatMoney(point.total)}`} /><span>{point.date.slice(5)}</span></div>)}
+          </div>
+          <div className="v1-table-wrap"><table className="v1-table"><thead><tr><th>日期</th><th>预估金额</th><th>新鲜快照</th><th>沿用快照</th><th>缺失账号</th><th>状态</th></tr></thead><tbody>
+            {trend.points.map((point) => <tr key={`${point.date}:row`}><td>{point.date}</td><td>{formatMoney(point.total)}</td><td>{formatNumber(point.freshAccountCount)}</td><td>{formatNumber(point.carriedForwardAccountCount)}</td><td>{formatNumber(point.missingAccountCount)}</td><td><StatusBadge label={point.isComplete ? "完整" : "待补全"} tone={point.isComplete ? "good" : "warn"} /></td></tr>)}
+          </tbody></table></div>
+        </>
+      ) : <div className="v1-analytics-state"><span>当前统计基线</span><strong>{summary?.snapshotDate ?? "--"}</strong><p>暂无可用日快照。</p></div>}
+    </>
+  );
 }

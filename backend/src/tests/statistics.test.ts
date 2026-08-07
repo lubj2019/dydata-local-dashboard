@@ -87,3 +87,24 @@ test("dashboard summary includes newly logged-in accounts in operations without 
   assert.equal(summary.accounts.pendingSyncCount, 1);
   assert.equal(summary.snapshot.missingAccountCount, 0);
 });
+
+test("dashboard trend carries the last usable snapshot across dates", () => {
+  const db = new AppDatabase(":memory:");
+  const account = db.createAccount("趋势账号");
+  const firstSync = new Date("2026-08-04T04:00:00.000Z");
+  const latestSync = new Date("2026-08-06T04:00:00.000Z");
+
+  db.replaceAccountSyncData(account.id, { tasks: [task(account.id, "task", 10)], videos: [], links: [] }, firstSync);
+  db.updateAccountStatus(account.id, { loginStatus: "active", lastSyncAt: firstSync.toISOString() });
+  db.finalizeDailySnapshots("2026-08-04", firstSync);
+  db.finalizeDailySnapshots("2026-08-05", new Date("2026-08-05T04:00:00.000Z"));
+  db.replaceAccountSyncData(account.id, { tasks: [task(account.id, "task", 15)], videos: [], links: [] }, latestSync);
+  db.updateAccountStatus(account.id, { loginStatus: "active", lastSyncAt: latestSync.toISOString() });
+  db.finalizeDailySnapshots("2026-08-06", latestSync);
+
+  const trend = new StatisticsService(db).getDashboardTrend({ from: "2026-08-04", to: "2026-08-06" });
+  assert.deepEqual(trend.points.map((point) => point.total), [10, 10, 15]);
+  assert.deepEqual(trend.points.map((point) => point.isComplete), [true, true, true]);
+  assert.equal(trend.points[1]?.carriedForwardAccountCount, 1);
+  assert.equal(trend.points[2]?.freshAccountCount, 1);
+});

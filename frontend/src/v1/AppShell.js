@@ -1,7 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
-import { archiveV2Account, bindV2TaskVideo, createV2Account, getAccounts, getAutoSyncStatus, getDashboardSummary, getV2Tasks, launchV2Login, runV2Sync, syncV2Account } from "../api";
+import { archiveV2Account, bindV2TaskVideo, createV2Account, getAccounts, getAutoSyncStatus, getDashboardSummary, getDashboardTrend, getV2Tasks, launchV2Login, runV2Sync, syncV2Account } from "../api";
 import { LoginStatusBadge, StatusBadge } from "./StatusBadge";
 import { formatDateTime, formatMoney, formatNumber, formatSignedMoney, getShanghaiDate } from "./format";
 import "./v1.css";
@@ -237,5 +237,33 @@ function VideoTable({ rows, onSelect }) {
     return _jsx("div", { className: "v1-table-wrap", children: _jsxs("table", { className: "v1-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "\u8D26\u53F7" }), _jsx("th", { children: "\u89C6\u9891\u6807\u9898" }), _jsx("th", { children: "\u5173\u8054\u4EFB\u52A1" }), _jsx("th", { children: "\u5B9E\u9645\u64AD\u653E" }), _jsx("th", { children: "\u64AD\u653E\u5DEE\u503C" }), _jsx("th", { children: "\u53D1\u5E03\u65F6\u95F4" })] }) }), _jsx("tbody", { children: videos.map((row) => _jsxs("tr", { onClick: () => onSelect(row), className: "v1-selectable-row", children: [_jsx("td", { children: row.accountName }), _jsx("td", { children: row.videoTitle ?? "--" }), _jsx("td", { children: row.taskName }), _jsx("td", { children: formatNumber(row.actualPlayCount) }), _jsx("td", { children: formatNumber(row.playDelta) }), _jsx("td", { children: formatDateTime(row.publishedAt) })] }, `${row.taskId}:${row.videoId}`)) })] }) });
 }
 function AnalyticsState({ summary }) {
-    return _jsxs("div", { className: "v1-analytics-state", children: [_jsx("span", { children: "\u5F53\u524D\u7EDF\u8BA1\u57FA\u7EBF" }), _jsx("strong", { children: summary?.snapshotDate ?? "--" }), _jsx("p", { children: summary?.isComplete ? "昨日最终快照可用于趋势聚合。" : "历史快照仍在补全。" })] });
+    const [range, setRange] = useState("7");
+    const [from, setFrom] = useState("");
+    const [to, setTo] = useState(summary?.snapshotDate ?? "");
+    const [trend, setTrend] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
+    useEffect(() => {
+        if (range !== "custom") {
+            setLoading(true);
+            setError(null);
+            void getDashboardTrend({ days: Number(range) })
+                .then(setTrend)
+                .catch((caught) => setError(caught instanceof Error ? caught.message : "趋势加载失败"))
+                .finally(() => setLoading(false));
+            return;
+        }
+        if (!from || !to || from > to) {
+            setTrend(null);
+            return;
+        }
+        setLoading(true);
+        setError(null);
+        void getDashboardTrend({ from, to })
+            .then(setTrend)
+            .catch((caught) => setError(caught instanceof Error ? caught.message : "趋势加载失败"))
+            .finally(() => setLoading(false));
+    }, [from, range, to]);
+    const maxTotal = Math.max(...(trend?.points.map((point) => point.total ?? 0) ?? [0]), 1);
+    return (_jsxs(_Fragment, { children: [_jsxs("div", { className: "v1-section-header v1-analytics-toolbar", children: [_jsxs("div", { children: [_jsx("h2", { children: "\u5386\u53F2\u8D8B\u52BF" }), _jsx("span", { children: trend ? `${trend.from} 至 ${trend.to}` : "选择统计区间" })] }), _jsxs("div", { className: "v1-filter-actions", children: [_jsxs("select", { "aria-label": "\u8D8B\u52BF\u533A\u95F4", value: range, onChange: (event) => setRange(event.target.value), children: [_jsx("option", { value: "7", children: "\u8FD1 7 \u5929" }), _jsx("option", { value: "30", children: "\u8FD1 30 \u5929" }), _jsx("option", { value: "custom", children: "\u81EA\u5B9A\u4E49\u533A\u95F4" })] }), range === "custom" ? _jsxs(_Fragment, { children: [_jsx("input", { "aria-label": "\u8D8B\u52BF\u5F00\u59CB\u65E5\u671F", type: "date", value: from, onChange: (event) => setFrom(event.target.value) }), _jsx("input", { "aria-label": "\u8D8B\u52BF\u7ED3\u675F\u65E5\u671F", type: "date", value: to, onChange: (event) => setTo(event.target.value) })] }) : null] })] }), error ? _jsx("div", { className: "v1-alert", children: error }) : null, loading ? _jsx("div", { className: "v1-empty", children: "\u52A0\u8F7D\u8D8B\u52BF\u4E2D..." }) : trend?.points.length ? (_jsxs(_Fragment, { children: [_jsx("div", { className: "v1-trend-chart", "aria-label": "\u9884\u4F30\u91D1\u989D\u8D8B\u52BF", children: trend.points.map((point) => _jsxs("div", { className: "v1-trend-column", children: [_jsx("div", { className: `v1-trend-bar${point.isComplete ? "" : " v1-trend-bar-incomplete"}`, style: { height: `${point.total === null ? 4 : Math.max(4, (point.total / maxTotal) * 100)}%` }, title: `${point.date}: ${formatMoney(point.total)}` }), _jsx("span", { children: point.date.slice(5) })] }, point.date)) }), _jsx("div", { className: "v1-table-wrap", children: _jsxs("table", { className: "v1-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "\u65E5\u671F" }), _jsx("th", { children: "\u9884\u4F30\u91D1\u989D" }), _jsx("th", { children: "\u65B0\u9C9C\u5FEB\u7167" }), _jsx("th", { children: "\u6CBF\u7528\u5FEB\u7167" }), _jsx("th", { children: "\u7F3A\u5931\u8D26\u53F7" }), _jsx("th", { children: "\u72B6\u6001" })] }) }), _jsx("tbody", { children: trend.points.map((point) => _jsxs("tr", { children: [_jsx("td", { children: point.date }), _jsx("td", { children: formatMoney(point.total) }), _jsx("td", { children: formatNumber(point.freshAccountCount) }), _jsx("td", { children: formatNumber(point.carriedForwardAccountCount) }), _jsx("td", { children: formatNumber(point.missingAccountCount) }), _jsx("td", { children: _jsx(StatusBadge, { label: point.isComplete ? "完整" : "待补全", tone: point.isComplete ? "good" : "warn" }) })] }, `${point.date}:row`)) })] }) })] })) : _jsxs("div", { className: "v1-analytics-state", children: [_jsx("span", { children: "\u5F53\u524D\u7EDF\u8BA1\u57FA\u7EBF" }), _jsx("strong", { children: summary?.snapshotDate ?? "--" }), _jsx("p", { children: "\u6682\u65E0\u53EF\u7528\u65E5\u5FEB\u7167\u3002" })] })] }));
 }

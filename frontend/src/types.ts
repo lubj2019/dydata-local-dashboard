@@ -65,6 +65,22 @@ export type DashboardSummary = {
   };
 };
 
+export type DashboardTrendPoint = {
+  date: string;
+  total: number | null;
+  expectedAccountCount: number;
+  freshAccountCount: number;
+  carriedForwardAccountCount: number;
+  missingAccountCount: number;
+  isComplete: boolean;
+};
+
+export type DashboardTrend = {
+  from: string;
+  to: string;
+  points: DashboardTrendPoint[];
+};
+
 export type MatchSource = "auto" | "manual" | null;
 
 export type TaskVideoRow = {

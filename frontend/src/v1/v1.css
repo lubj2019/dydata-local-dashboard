@@ -51,8 +51,9 @@ button { cursor: pointer; }
 .v1-text-action { border: 0; background: transparent; color: #2563eb; }
 .v1-account-toolbar { align-items: flex-end; }
 .v1-task-toolbar { align-items: flex-end; }
+.v1-analytics-toolbar { align-items: flex-end; }
 .v1-filter-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
-.v1-filter-actions select { min-height: 34px; max-width: 190px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 9px; background: #ffffff; color: #334155; }
+.v1-filter-actions select, .v1-filter-actions input { min-height: 34px; max-width: 190px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 9px; background: #ffffff; color: #334155; }
 .v1-account-actions, .v1-row-actions { display: flex; align-items: center; gap: 8px; }
 .v1-account-actions input { width: 150px; min-height: 34px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 10px; }
 .v1-account-actions button, .v1-row-actions button { min-height: 32px; border: 0; border-radius: 5px; padding: 0 10px; background: #2563eb; color: #ffffff; font-size: 12px; }
@@ -67,6 +68,10 @@ button { cursor: pointer; }
 .v1-task-table { min-width: 1180px; }
 .v1-task-details { padding: 10px; background: #f8fafc; }
 .v1-task-details .v1-table { background: #ffffff; }
+.v1-trend-chart { display: flex; align-items: end; gap: 8px; height: 250px; margin-bottom: 18px; padding: 20px 16px 0; border: 1px solid #dfe7f0; border-radius: 8px; background: #ffffff; }
+.v1-trend-column { display: flex; min-width: 24px; flex: 1; height: 100%; flex-direction: column; align-items: center; justify-content: end; gap: 8px; color: #64748b; font-size: 11px; }
+.v1-trend-bar { width: min(32px, 80%); min-height: 4px; border-radius: 4px 4px 0 0; background: #2563eb; }
+.v1-trend-bar-incomplete { background: #f59e0b; }
 .v1-cell-error { max-width: 260px; overflow: hidden; color: #b91c1c; text-overflow: ellipsis; }
 .v1-empty, .v1-analytics-state { display: grid; min-height: 126px; place-items: center; border: 1px dashed #cbd5e1; border-radius: 8px; color: #64748b; }
 .v1-analytics-state { justify-items: start; align-content: center; gap: 8px; padding: 22px; background: #ffffff; }

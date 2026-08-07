@@ -1,4 +1,4 @@
-import type { AccountSummary, AutoSyncStatus, DashboardSummary, DailyEstimateSummary, TaskPlayGrowthPage, TaskVideoRow } from "./types";
+import type { AccountSummary, AutoSyncStatus, DashboardSummary, DashboardTrend, DailyEstimateSummary, TaskPlayGrowthPage, TaskVideoRow } from "./types";
 
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
@@ -60,6 +60,15 @@ export function getDailyEstimateSummary(): Promise<DailyEstimateSummary> {
 
 export function getDashboardSummary(): Promise<DashboardSummary> {
   return request<DashboardSummary>("/api/v2/dashboard/summary");
+}
+
+export function getDashboardTrend(options: { days?: number; from?: string; to?: string } = {}): Promise<DashboardTrend> {
+  const params = new URLSearchParams();
+  if (options.days !== undefined) params.set("days", String(options.days));
+  if (options.from) params.set("from", options.from);
+  if (options.to) params.set("to", options.to);
+  const query = params.toString();
+  return request<DashboardTrend>(`/api/v2/dashboard/trend${query ? `?${query}` : ""}`);
 }
 
 export function createV2Account(displayName: string): Promise<AccountSummary> {

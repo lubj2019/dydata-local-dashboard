@@ -1,6 +1,6 @@
 import { getPreviousDateKey, getShanghaiDateKey } from "../domain/dailyEstimate.js";
 import type { AccountRecord } from "../domain/types.js";
-import { AppDatabase } from "./db.js";
+import { AppDatabase, type DailyEstimateTrendPoint } from "./db.js";
 
 export type DashboardAccountState = {
   accountId: string;
@@ -35,8 +35,22 @@ export type DashboardSummary = {
   };
 };
 
+export type DashboardTrend = {
+  from: string;
+  to: string;
+  points: DailyEstimateTrendPoint[];
+};
+
 function isEligibleForSnapshot(account: AccountRecord, snapshotDate: string): boolean {
   return Boolean(account.firstLoggedInAt && getShanghaiDateKey(new Date(account.firstLoggedInAt)) <= snapshotDate);
+}
+
+function isShanghaiDateKey(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const date = new Date(`${value}T12:00:00+08:00`);
+  return !Number.isNaN(date.getTime()) && getShanghaiDateKey(date) === value;
 }
 
 function getFreshness(account: AccountRecord, snapshotDate: string, now: Date, db: AppDatabase): DashboardAccountState {
@@ -75,6 +89,32 @@ function getFreshness(account: AccountRecord, snapshotDate: string, now: Date, d
 
 export class StatisticsService {
   constructor(private readonly db: AppDatabase) {}
+
+  getDashboardTrend(options: { days?: number; from?: string; to?: string } = {}, now = new Date()): DashboardTrend {
+    const yesterday = getPreviousDateKey(now);
+    const customRange = options.from !== undefined || options.to !== undefined;
+    let from: string;
+    let to: string;
+
+    if (customRange) {
+      if (!options.from || !options.to || !isShanghaiDateKey(options.from) || !isShanghaiDateKey(options.to) || options.from > options.to) {
+        throw new Error("趋势日期范围无效");
+      }
+      from = options.from;
+      to = options.to;
+    } else {
+      const days = options.days ?? 7;
+      if (!Number.isInteger(days) || days < 1 || days > 90) {
+        throw new Error("趋势天数必须在 1 到 90 之间");
+      }
+      to = yesterday;
+      const start = new Date(`${to}T12:00:00+08:00`);
+      start.setUTCDate(start.getUTCDate() - days + 1);
+      from = getShanghaiDateKey(start);
+    }
+
+    return { from, to, points: this.db.getDailyEstimateTrend(from, to) };
+  }
 
   getDashboardSummary(now = new Date()): DashboardSummary {
     const estimate = this.db.getDailyEstimateSummary(now);

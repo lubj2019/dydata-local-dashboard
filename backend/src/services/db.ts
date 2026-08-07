@@ -44,6 +44,22 @@ export type DailyEstimateSummary = {
   isComplete: boolean;
 };
 
+export type DailyEstimateTrendPoint = {
+  date: string;
+  total: number | null;
+  expectedAccountCount: number;
+  freshAccountCount: number;
+  carriedForwardAccountCount: number;
+  missingAccountCount: number;
+  isComplete: boolean;
+};
+
+function shiftShanghaiDateKey(dateKey: string, days: number): string {
+  const date = new Date(`${dateKey}T12:00:00+08:00`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return getShanghaiDateKey(date);
+}
+
 function mapAccount(row: AccountRow): AccountRecord {
   return {
     id: row.id,
@@ -1120,6 +1136,78 @@ export class AppDatabase {
       .all(previousDate, pageSize, offset) as TaskPlayGrowthRow[];
 
     return { items, page: safePage, pageSize, total };
+  }
+
+  getDailyEstimateTrend(startDate: string, endDate: string): DailyEstimateTrendPoint[] {
+    const points: DailyEstimateTrendPoint[] = [];
+    const getPoint = this.db.prepare(`
+      WITH eligible_accounts AS (
+        SELECT id
+        FROM accounts
+        WHERE first_logged_in_at IS NOT NULL
+          AND date(first_logged_in_at) <= date(?)
+      ),
+      resolved_snapshots AS (
+        SELECT
+          a.id as account_id,
+          current_snapshot.status as current_status,
+          CASE
+            WHEN current_snapshot.status IN ('fresh', 'carried_forward') THEN current_snapshot.id
+            ELSE (
+              SELECT previous.id
+              FROM daily_account_snapshots previous
+              WHERE previous.account_id = a.id
+                AND previous.snapshot_date < ?
+                AND previous.status IN ('fresh', 'carried_forward')
+              ORDER BY previous.snapshot_date DESC
+              LIMIT 1
+            )
+          END as snapshot_id
+        FROM eligible_accounts a
+        LEFT JOIN daily_account_snapshots current_snapshot
+          ON current_snapshot.account_id = a.id
+          AND current_snapshot.snapshot_date = ?
+      ),
+      account_totals AS (
+        SELECT
+          resolved.account_id,
+          resolved.current_status,
+          resolved.snapshot_id,
+          COALESCE(SUM(tasks.predicted_amount), 0) as total
+        FROM resolved_snapshots resolved
+        LEFT JOIN daily_snapshot_tasks tasks ON tasks.snapshot_id = resolved.snapshot_id
+        GROUP BY resolved.account_id, resolved.current_status, resolved.snapshot_id
+      )
+      SELECT
+        COUNT(*) as expectedAccountCount,
+        SUM(CASE WHEN snapshot_id IS NULL THEN 1 ELSE 0 END) as missingAccountCount,
+        SUM(CASE WHEN current_status = 'fresh' THEN 1 ELSE 0 END) as freshAccountCount,
+        SUM(CASE WHEN snapshot_id IS NOT NULL AND current_status <> 'fresh' OR snapshot_id IS NOT NULL AND current_status IS NULL THEN 1 ELSE 0 END) as carriedForwardAccountCount,
+        SUM(CASE WHEN snapshot_id IS NOT NULL THEN total ELSE 0 END) as total
+      FROM account_totals
+    `);
+
+    for (let date = startDate; date <= endDate; date = shiftShanghaiDateKey(date, 1)) {
+      const row = getPoint.get(date, date, date) as {
+        expectedAccountCount: number;
+        freshAccountCount: number;
+        carriedForwardAccountCount: number;
+        missingAccountCount: number;
+        total: number;
+      };
+      const usableAccountCount = row.expectedAccountCount - row.missingAccountCount;
+      points.push({
+        date,
+        total: usableAccountCount === 0 ? null : row.total,
+        expectedAccountCount: row.expectedAccountCount,
+        freshAccountCount: row.freshAccountCount,
+        carriedForwardAccountCount: row.carriedForwardAccountCount,
+        missingAccountCount: row.missingAccountCount,
+        isComplete: row.missingAccountCount === 0
+      });
+    }
+
+    return points;
   }
 
   getDailyEstimateSummary(now = new Date()): DailyEstimateSummary {
