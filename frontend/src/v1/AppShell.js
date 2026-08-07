@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 import { archiveV2Account, bindV2TaskVideo, createV2Account, getAccounts, getAutoSyncStatus, getDashboardSummary, getDashboardTrend, getV2Tasks, launchV2Login, runV2Sync, syncV2Account } from "../api";
 import { LoginStatusBadge, StatusBadge } from "./StatusBadge";
 import { formatDateTime, formatMoney, formatNumber, formatSignedMoney, getShanghaiDate } from "./format";
+import { nextVideoSort, sortVideoRows } from "../videoSorting";
 import "./v1.css";
 const navigation = [
     { id: "dashboard", label: "总览" },
@@ -230,11 +231,16 @@ function TaskTable({ rows, onSelect, compact = false }) {
     return _jsx("div", { className: "v1-table-wrap", children: _jsxs("table", { className: "v1-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "\u8D26\u53F7" }), _jsx("th", { children: "\u4EFB\u52A1\u540D\u79F0" }), _jsx("th", { children: "\u72B6\u6001" }), _jsx("th", { children: "\u5F53\u524D\u9884\u4F30" }), _jsx("th", { children: "\u4ECA\u65E5\u589E\u91CF" }), _jsx("th", { children: "\u5B9E\u9645\u64AD\u653E" }), compact ? null : _jsx("th", { children: "\u6700\u540E\u540C\u6B65" })] }) }), _jsx("tbody", { children: rows.map((row) => _jsxs("tr", { onClick: () => onSelect(row), className: "v1-selectable-row", children: [_jsx("td", { children: row.accountName }), _jsx("td", { children: row.taskName }), _jsx("td", { children: _jsx(StatusBadge, { label: row.taskStatus }) }), _jsx("td", { children: formatMoney(getTaskEstimate(row)) }), _jsx("td", { children: formatSignedMoney(row.todayPredictedDelta) }), _jsx("td", { children: formatNumber(row.actualPlayCount) }), compact ? null : _jsx("td", { children: formatDateTime(row.lastSyncedAt) })] }, row.taskId)) })] }) });
 }
 function VideoTable({ rows, onSelect }) {
-    const videos = rows.filter((row) => row.videoId);
+    const [sort, setSort] = useState(null);
+    const videos = useMemo(() => sortVideoRows(rows.filter((row) => row.videoId), sort), [rows, sort]);
     if (videos.length === 0) {
         return _jsx(EmptyState, { title: "\u6682\u65E0\u5DF2\u7ED1\u5B9A\u89C6\u9891" });
     }
-    return _jsx("div", { className: "v1-table-wrap", children: _jsxs("table", { className: "v1-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "\u8D26\u53F7" }), _jsx("th", { children: "\u89C6\u9891\u6807\u9898" }), _jsx("th", { children: "\u5173\u8054\u4EFB\u52A1" }), _jsx("th", { children: "\u5B9E\u9645\u64AD\u653E" }), _jsx("th", { children: "\u64AD\u653E\u5DEE\u503C" }), _jsx("th", { children: "\u53D1\u5E03\u65F6\u95F4" })] }) }), _jsx("tbody", { children: videos.map((row) => _jsxs("tr", { onClick: () => onSelect(row), className: "v1-selectable-row", children: [_jsx("td", { children: row.accountName }), _jsx("td", { children: row.videoTitle ?? "--" }), _jsx("td", { children: row.taskName }), _jsx("td", { children: formatNumber(row.actualPlayCount) }), _jsx("td", { children: formatNumber(row.playDelta) }), _jsx("td", { children: formatDateTime(row.publishedAt) })] }, `${row.taskId}:${row.videoId}`)) })] }) });
+    function sortHeader(label, key) {
+        const direction = sort?.key === key ? sort.direction : null;
+        return _jsx("th", { children: _jsxs("button", { type: "button", className: direction ? "v1-sort-button active" : "v1-sort-button", onClick: () => setSort(nextVideoSort(sort, key)), "aria-label": `${label}排序`, children: [_jsx("span", { children: label }), _jsx("span", { className: "v1-sort-indicator", "aria-hidden": "true", children: direction === "asc" ? "▲" : direction === "desc" ? "▼" : "↕" })] }) });
+    }
+    return _jsx("div", { className: "v1-table-wrap", children: _jsxs("table", { className: "v1-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "\u8D26\u53F7" }), _jsx("th", { children: "\u89C6\u9891\u6807\u9898" }), _jsx("th", { children: "\u5173\u8054\u4EFB\u52A1" }), sortHeader("实际播放", "actualPlayCount"), sortHeader("播放差值", "playDelta"), sortHeader("发布时间", "publishedAt")] }) }), _jsx("tbody", { children: videos.map((row) => _jsxs("tr", { onClick: () => onSelect(row), className: "v1-selectable-row", children: [_jsx("td", { children: row.accountName }), _jsx("td", { children: row.videoTitle ?? "--" }), _jsx("td", { children: row.taskName }), _jsx("td", { children: formatNumber(row.actualPlayCount) }), _jsx("td", { children: formatNumber(row.playDelta) }), _jsx("td", { children: formatDateTime(row.publishedAt) })] }, `${row.taskId}:${row.videoId}`)) })] }) });
 }
 function AnalyticsState({ summary }) {
     const [range, setRange] = useState("7");

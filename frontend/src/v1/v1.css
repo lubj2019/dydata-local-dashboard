@@ -63,6 +63,9 @@ button { cursor: pointer; }
 .v1-table { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
 .v1-table th { height: 40px; padding: 0 14px; background: #f8fafc; color: #64748b; font-weight: 600; text-align: left; }
 .v1-table td { height: 48px; padding: 0 14px; border-top: 1px solid #edf2f7; }
+.v1-sort-button { display: inline-flex; align-items: center; gap: 4px; border: 0; padding: 0; background: transparent; color: inherit; font-size: inherit; font-weight: inherit; }
+.v1-sort-button:hover, .v1-sort-button.active { color: #2563eb; }
+.v1-sort-indicator { font-size: 10px; line-height: 1; }
 .v1-selectable-row { cursor: pointer; }
 .v1-selectable-row:hover { background: #f5f9ff; }
 .v1-task-table { min-width: 1180px; }

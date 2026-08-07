@@ -4,6 +4,7 @@ import { archiveV2Account, bindV2TaskVideo, createV2Account, getAccounts, getAut
 import type { AccountSummary, AutoSyncStatus, DashboardSummary, DashboardTrend, DailyEstimateSummary, TaskVideoRow } from "../types";
 import { LoginStatusBadge, StatusBadge } from "./StatusBadge";
 import { formatDateTime, formatMoney, formatNumber, formatSignedMoney, getShanghaiDate } from "./format";
+import { nextVideoSort, sortVideoRows, type VideoSort, type VideoSortKey } from "../videoSorting";
 import "./v1.css";
 
 type PageId = "dashboard" | "accounts" | "tasks" | "videos" | "analytics";
@@ -467,12 +468,18 @@ function TaskTable({ rows, onSelect, compact = false }: { rows: TaskVideoRow[]; 
 }
 
 function VideoTable({ rows, onSelect }: { rows: TaskVideoRow[]; onSelect: (row: TaskVideoRow) => void }) {
-  const videos = rows.filter((row) => row.videoId);
+  const [sort, setSort] = useState<VideoSort | null>(null);
+  const videos = useMemo(() => sortVideoRows(rows.filter((row) => row.videoId), sort), [rows, sort]);
   if (videos.length === 0) {
     return <EmptyState title="暂无已绑定视频" />;
   }
 
-  return <div className="v1-table-wrap"><table className="v1-table"><thead><tr><th>账号</th><th>视频标题</th><th>关联任务</th><th>实际播放</th><th>播放差值</th><th>发布时间</th></tr></thead><tbody>
+  function sortHeader(label: string, key: VideoSortKey) {
+    const direction = sort?.key === key ? sort.direction : null;
+    return <th><button type="button" className={direction ? "v1-sort-button active" : "v1-sort-button"} onClick={() => setSort(nextVideoSort(sort, key))} aria-label={`${label}排序`}><span>{label}</span><span className="v1-sort-indicator" aria-hidden="true">{direction === "asc" ? "▲" : direction === "desc" ? "▼" : "↕"}</span></button></th>;
+  }
+
+  return <div className="v1-table-wrap"><table className="v1-table"><thead><tr><th>账号</th><th>视频标题</th><th>关联任务</th>{sortHeader("实际播放", "actualPlayCount")}{sortHeader("播放差值", "playDelta")}{sortHeader("发布时间", "publishedAt")}</tr></thead><tbody>
     {videos.map((row) => <tr key={`${row.taskId}:${row.videoId}`} onClick={() => onSelect(row)} className="v1-selectable-row"><td>{row.accountName}</td><td>{row.videoTitle ?? "--"}</td><td>{row.taskName}</td><td>{formatNumber(row.actualPlayCount)}</td><td>{formatNumber(row.playDelta)}</td><td>{formatDateTime(row.publishedAt)}</td></tr>)}
   </tbody></table></div>;
 }
