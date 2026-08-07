@@ -62,6 +62,26 @@ export function getDashboardSummary(): Promise<DashboardSummary> {
   return request<DashboardSummary>("/api/v2/dashboard/summary");
 }
 
+export function createV2Account(displayName: string): Promise<AccountSummary> {
+  return request<AccountSummary>("/api/v2/accounts", { method: "POST", body: JSON.stringify({ displayName }) });
+}
+
+export function launchV2Login(accountId: string): Promise<{ status: string }> {
+  return request<{ status: string }>(`/api/v2/accounts/${accountId}/login`, { method: "POST", body: "{}" });
+}
+
+export function syncV2Account(accountId: string): Promise<{ status: string }> {
+  return request<{ status: string }>(`/api/v2/accounts/${accountId}/sync`, { method: "POST", body: "{}" });
+}
+
+export function archiveV2Account(accountId: string): Promise<{ status: string }> {
+  return request<{ status: string }>(`/api/v2/accounts/${accountId}/archive`, { method: "PATCH" });
+}
+
+export function runV2Sync(): Promise<{ status: string }> {
+  return request<{ status: string }>("/api/v2/sync/run-all", { method: "POST", body: "{}" });
+}
+
 export function runAllSync(): Promise<{ status: "started" | "queued" }> {
   return request<{ status: "started" | "queued" }>("/api/sync/run-all", {
     method: "POST",

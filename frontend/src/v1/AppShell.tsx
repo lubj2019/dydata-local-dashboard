@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { getAccounts, getAutoSyncStatus, getDashboardSummary, getTaskVideos } from "../api";
+import { archiveV2Account, createV2Account, getAccounts, getAutoSyncStatus, getDashboardSummary, getTaskVideos, launchV2Login, runV2Sync, syncV2Account } from "../api";
 import type { AccountSummary, AutoSyncStatus, DashboardSummary, DailyEstimateSummary, TaskVideoRow } from "../types";
 import { LoginStatusBadge, StatusBadge } from "./StatusBadge";
 import { formatDateTime, formatMoney, formatNumber, formatSignedMoney, getShanghaiDate } from "./format";
@@ -222,7 +222,7 @@ export default function AppShell() {
               </>
             ) : null}
 
-            {page === "accounts" ? <AccountsTable accounts={data.accounts} /> : null}
+            {page === "accounts" ? <AccountsTable accounts={data.accounts} onRefresh={() => void refresh()} /> : null}
             {page === "tasks" ? <TaskTable rows={data.rows} onSelect={setSelectedTask} /> : null}
             {page === "videos" ? <VideoTable rows={data.rows} onSelect={setSelectedTask} /> : null}
             {page === "analytics" ? <AnalyticsState summary={summary} /> : null}
@@ -261,18 +261,47 @@ export default function AppShell() {
   );
 }
 
-function AccountsTable({ accounts }: { accounts: AccountSummary[] }) {
+function AccountsTable({ accounts, onRefresh }: { accounts: AccountSummary[]; onRefresh: () => void }) {
+  const [displayName, setDisplayName] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function run(action: () => Promise<unknown>, id: string, success: string) {
+    setBusyId(id);
+    setMessage(null);
+    try {
+      await action();
+      setMessage(success);
+      onRefresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "操作失败");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function create() {
+    const value = displayName.trim();
+    if (!value) {
+      setMessage("请输入账号名称");
+      return;
+    }
+    await run(() => createV2Account(value), "create", "账号已创建");
+    setDisplayName("");
+  }
+
   return (
     <>
-      <div className="v1-section-header">
+      <div className="v1-section-header v1-account-toolbar">
         <div><h2>活跃账号</h2><span>默认隐藏已归档账号</span></div>
-        <span>{formatNumber(accounts.length)} 个账号</span>
+        <div className="v1-account-actions"><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="新增账号名称" /><button type="button" onClick={() => void create()} disabled={busyId !== null}>新增账号</button><button type="button" className="v1-button-secondary" onClick={() => void run(runV2Sync, "all", "批量同步已提交")} disabled={busyId !== null}>批量同步</button></div>
       </div>
+      {message ? <div className="v1-inline-message">{message}</div> : null}
       {accounts.length === 0 ? <EmptyState title="暂无活跃账号" /> : (
-        <div className="v1-table-wrap"><table className="v1-table"><thead><tr><th>账号名称</th><th>抖音号</th><th>登录状态</th><th>最近同步</th><th>数据新鲜度</th><th>最近错误</th></tr></thead><tbody>
+        <div className="v1-table-wrap"><table className="v1-table"><thead><tr><th>账号名称</th><th>抖音号</th><th>登录状态</th><th>最近同步</th><th>数据新鲜度</th><th>最近错误</th><th>操作</th></tr></thead><tbody>
           {accounts.map((account) => {
             const freshness = getFreshness(account.lastSyncAt);
-            return <tr key={account.id}><td>{account.displayName}</td><td>{account.douyinId ?? "--"}</td><td><LoginStatusBadge status={account.loginStatus} /></td><td>{formatDateTime(account.lastSyncAt)}</td><td><StatusBadge {...freshness} /></td><td className="v1-cell-error">{account.lastError ?? "--"}</td></tr>;
+            return <tr key={account.id}><td>{account.displayName}</td><td>{account.douyinId ?? "--"}</td><td><LoginStatusBadge status={account.loginStatus} /></td><td>{formatDateTime(account.lastSyncAt)}</td><td><StatusBadge {...freshness} /></td><td className="v1-cell-error">{account.lastError ?? "--"}</td><td><div className="v1-row-actions"><button type="button" onClick={() => void run(() => launchV2Login(account.id), account.id, "登录窗口已启动")} disabled={busyId !== null}>登录</button><button type="button" onClick={() => void run(() => syncV2Account(account.id), account.id, "同步已完成")} disabled={busyId !== null}>同步</button><button type="button" className="v1-button-secondary" onClick={() => void run(() => archiveV2Account(account.id), account.id, "账号已归档")} disabled={busyId !== null}>归档</button></div></td></tr>;
           })}
         </tbody></table></div>
       )}

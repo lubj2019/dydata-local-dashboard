@@ -49,6 +49,12 @@ button { cursor: pointer; }
 .v1-queue-item { display: grid; grid-template-columns: minmax(120px, .5fr) minmax(0, 1fr) auto; align-items: center; gap: 14px; min-height: 52px; padding: 8px 12px; border: 1px solid #dfe7f0; border-radius: 6px; background: #ffffff; color: #1e293b; text-align: left; }
 .v1-queue-item small { overflow: hidden; color: #64748b; text-overflow: ellipsis; white-space: nowrap; }
 .v1-text-action { border: 0; background: transparent; color: #2563eb; }
+.v1-account-toolbar { align-items: flex-end; }
+.v1-account-actions, .v1-row-actions { display: flex; align-items: center; gap: 8px; }
+.v1-account-actions input { width: 150px; min-height: 34px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 10px; }
+.v1-account-actions button, .v1-row-actions button { min-height: 32px; border: 0; border-radius: 5px; padding: 0 10px; background: #2563eb; color: #ffffff; font-size: 12px; }
+.v1-button-secondary { background: #e8eef7 !important; color: #334155 !important; }
+.v1-inline-message { margin: -4px 0 12px; color: #2563eb; font-size: 13px; }
 .v1-table-wrap { overflow: auto; border: 1px solid #dfe7f0; border-radius: 8px; background: #ffffff; }
 .v1-table { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
 .v1-table th { height: 40px; padding: 0 14px; background: #f8fafc; color: #64748b; font-weight: 600; text-align: left; }
