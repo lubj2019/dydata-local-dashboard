@@ -48,6 +48,21 @@ export function getDailyEstimateSummary() {
 export function getDashboardSummary() {
     return request("/api/v2/dashboard/summary");
 }
+export function createV2Account(displayName) {
+    return request("/api/v2/accounts", { method: "POST", body: JSON.stringify({ displayName }) });
+}
+export function launchV2Login(accountId) {
+    return request(`/api/v2/accounts/${accountId}/login`, { method: "POST", body: "{}" });
+}
+export function syncV2Account(accountId) {
+    return request(`/api/v2/accounts/${accountId}/sync`, { method: "POST", body: "{}" });
+}
+export function archiveV2Account(accountId) {
+    return request(`/api/v2/accounts/${accountId}/archive`, { method: "PATCH" });
+}
+export function runV2Sync() {
+    return request("/api/v2/sync/run-all", { method: "POST", body: "{}" });
+}
 export function runAllSync() {
     return request("/api/sync/run-all", {
         method: "POST",
