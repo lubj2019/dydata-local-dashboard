@@ -7,6 +7,7 @@ import Fastify from "fastify";
 import { registerAccountRoutes } from "./routes/accounts.js";
 import { registerSyncRoutes } from "./routes/sync.js";
 import { registerTaskVideoRoutes } from "./routes/taskVideos.js";
+import { registerV2Routes } from "./routes/v2.js";
 import { AutoSyncService } from "./services/autoSync.js";
 import { AppDatabase } from "./services/db.js";
 import { ScraperService } from "./services/scraper.js";
@@ -28,6 +29,7 @@ export function buildApp() {
   registerAccountRoutes(app, db, scraper);
   registerSyncRoutes(app, autoSync);
   registerTaskVideoRoutes(app, db);
+  registerV2Routes(app, db, scraper, autoSync);
 
   if (fs.existsSync(frontendDistDir)) {
     void app.register(fastifyStatic, { root: frontendDistDir });
