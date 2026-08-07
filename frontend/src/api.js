@@ -45,6 +45,9 @@ export function getAutoSyncStatus() {
 export function getDailyEstimateSummary() {
     return request("/api/daily-estimate-summary");
 }
+export function getDashboardSummary() {
+    return request("/api/v2/dashboard/summary");
+}
 export function runAllSync() {
     return request("/api/sync/run-all", {
         method: "POST",

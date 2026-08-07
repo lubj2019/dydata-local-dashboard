@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { getAccounts, getAutoSyncStatus, getDailyEstimateSummary, getTaskVideos } from "../api";
-import type { AccountSummary, AutoSyncStatus, DailyEstimateSummary, TaskVideoRow } from "../types";
+import { getAccounts, getAutoSyncStatus, getDashboardSummary, getTaskVideos } from "../api";
+import type { AccountSummary, AutoSyncStatus, DashboardSummary, DailyEstimateSummary, TaskVideoRow } from "../types";
 import { LoginStatusBadge, StatusBadge } from "./StatusBadge";
 import { formatDateTime, formatMoney, formatNumber, formatSignedMoney, getShanghaiDate } from "./format";
 import "./v1.css";
@@ -11,6 +11,7 @@ type DataState = {
   accounts: AccountSummary[];
   rows: TaskVideoRow[];
   summary: DailyEstimateSummary | null;
+  dashboard: DashboardSummary | null;
   sync: AutoSyncStatus | null;
 };
 
@@ -65,7 +66,7 @@ function EmptyState({ title }: { title: string }) {
 
 export default function AppShell() {
   const [page, setPage] = useState<PageId>("dashboard");
-  const [data, setData] = useState<DataState>({ accounts: [], rows: [], summary: null, sync: null });
+  const [data, setData] = useState<DataState>({ accounts: [], rows: [], summary: null, dashboard: null, sync: null });
   const [selectedTask, setSelectedTask] = useState<TaskVideoRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -74,13 +75,24 @@ export default function AppShell() {
     setLoading(true);
     setError(null);
     try {
-      const [accounts, rows, summary, sync] = await Promise.all([
+      const [accounts, rows, dashboard, sync] = await Promise.all([
         getAccounts(),
         getTaskVideos({}),
-        getDailyEstimateSummary(),
+        getDashboardSummary(),
         getAutoSyncStatus()
       ]);
-      setData({ accounts, rows, summary, sync });
+      const summary: DailyEstimateSummary = {
+        yesterdayEstimatedTotal: dashboard.yesterdayFinalEstimatedTotal,
+        todayEstimatedTotal: dashboard.realtimeEstimatedTotal,
+        dailyIncrease: dashboard.dailyIncrease,
+        snapshotDate: dashboard.snapshotDate,
+        expectedAccountCount: dashboard.snapshot.expectedAccountCount,
+        freshAccountCount: dashboard.snapshot.freshAccountCount,
+        carriedForwardAccountCount: dashboard.snapshot.carriedForwardAccountCount,
+        missingAccountCount: dashboard.snapshot.missingAccountCount,
+        isComplete: dashboard.snapshot.isComplete
+      };
+      setData({ accounts, rows, summary, dashboard, sync });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "数据加载失败");
     } finally {
@@ -95,11 +107,15 @@ export default function AppShell() {
   const insights = useMemo(() => {
     const today = getShanghaiDate(new Date());
     const activeAccounts = data.accounts.filter((account) => account.loginStatus === "active").length;
-    const exceptions = data.accounts.filter((account) => account.lastError || account.loginStatus !== "active");
+    const exceptions = data.dashboard
+      ? data.dashboard.accounts.exceptions
+      : data.accounts
+        .filter((account) => account.lastError || account.loginStatus !== "active")
+        .map((account) => ({ accountId: account.id, displayName: account.displayName, message: account.lastError, lastSyncAt: account.lastSyncAt }));
     const staleAccounts = data.accounts.filter((account) => getFreshness(account.lastSyncAt).tone !== "good");
     const publishedToday = data.rows.filter((row) => row.publishedAt && getShanghaiDate(row.publishedAt) === today).length;
     const rankedTasks = [...data.rows].sort((left, right) => (right.todayPredictedDelta ?? -Infinity) - (left.todayPredictedDelta ?? -Infinity));
-    const lastSyncAt = data.accounts.reduce<string | null>((latest, account) => {
+    const lastSyncAt = data.dashboard?.updatedAt ?? data.accounts.reduce<string | null>((latest, account) => {
       if (!account.lastSyncAt || (latest && latest >= account.lastSyncAt)) {
         return latest;
       }
@@ -165,8 +181,8 @@ export default function AppShell() {
                   <Metric label="昨日最终预估" value={formatMoney(summary?.yesterdayEstimatedTotal)} caption="昨日已结算" />
                   <Metric label="今日增量" value={formatSignedMoney(summary?.dailyIncrease)} caption={summary?.isComplete ? "实时对昨日已结算" : "待补全"} tone={deltaTone} />
                   <Metric label="今日已发布视频" value={formatNumber(insights.publishedToday)} caption="按上海日期" />
-                  <Metric label="活跃账号" value={formatNumber(insights.activeAccounts)} caption={`${formatNumber(data.accounts.length)} 个账号`} />
-                  <Metric label="待处理账号" value={formatNumber(insights.exceptions.length)} caption={summary?.isComplete ? "数据完整" : "快照待补全"} tone={insights.exceptions.length ? "negative" : "positive"} />
+                  <Metric label="活跃账号" value={formatNumber(data.dashboard?.accounts.activeCount ?? insights.activeAccounts)} caption={`${formatNumber(data.accounts.length)} 个账号`} />
+                  <Metric label="待处理账号" value={formatNumber(data.dashboard?.accounts.pendingSyncCount ?? insights.exceptions.length)} caption={summary?.isComplete ? "数据完整" : "快照待补全"} tone={insights.exceptions.length ? "negative" : "positive"} />
                 </div>
 
                 <div className="v1-section-header">
@@ -180,7 +196,7 @@ export default function AppShell() {
                   <EmptyState title="当前没有待处理账号" />
                 ) : (
                   <div className="v1-queue">
-                    {[...insights.exceptions, ...insights.staleAccounts.filter((account) => !insights.exceptions.some((item) => item.id === account.id))]
+                    {[...insights.exceptions.map((account) => ({ id: account.accountId, displayName: account.displayName, lastError: account.message, lastSyncAt: account.lastSyncAt })), ...insights.staleAccounts.filter((account) => !insights.exceptions.some((item) => item.accountId === account.id))]
                       .slice(0, 6)
                       .map((account) => {
                         const freshness = getFreshness(account.lastSyncAt);

@@ -43,6 +43,28 @@ export type DailyEstimateSummary = {
   isComplete: boolean;
 };
 
+export type DashboardSummary = {
+  updatedAt: string | null;
+  realtimeEstimatedTotal: number | null;
+  yesterdayFinalEstimatedTotal: number | null;
+  dailyIncrease: number | null;
+  snapshotDate: string;
+  snapshot: {
+    expectedAccountCount: number;
+    freshAccountCount: number;
+    carriedForwardAccountCount: number;
+    missingAccountCount: number;
+    isComplete: boolean;
+    missingAccounts: Array<{ accountId: string; displayName: string; message: string | null }>;
+  };
+  accounts: {
+    activeCount: number;
+    exceptionCount: number;
+    pendingSyncCount: number;
+    exceptions: Array<{ accountId: string; displayName: string; message: string | null; lastSyncAt: string | null }>;
+  };
+};
+
 export type MatchSource = "auto" | "manual" | null;
 
 export type TaskVideoRow = {

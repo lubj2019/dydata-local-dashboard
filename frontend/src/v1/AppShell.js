@@ -1,6 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useEffect, useMemo, useState } from "react";
-import { getAccounts, getAutoSyncStatus, getDailyEstimateSummary, getTaskVideos } from "../api";
+import { getAccounts, getAutoSyncStatus, getDashboardSummary, getTaskVideos } from "../api";
 import { LoginStatusBadge, StatusBadge } from "./StatusBadge";
 import { formatDateTime, formatMoney, formatNumber, formatSignedMoney, getShanghaiDate } from "./format";
 import "./v1.css";
@@ -42,7 +42,7 @@ function EmptyState({ title }) {
 }
 export default function AppShell() {
     const [page, setPage] = useState("dashboard");
-    const [data, setData] = useState({ accounts: [], rows: [], summary: null, sync: null });
+    const [data, setData] = useState({ accounts: [], rows: [], summary: null, dashboard: null, sync: null });
     const [selectedTask, setSelectedTask] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -50,13 +50,24 @@ export default function AppShell() {
         setLoading(true);
         setError(null);
         try {
-            const [accounts, rows, summary, sync] = await Promise.all([
+            const [accounts, rows, dashboard, sync] = await Promise.all([
                 getAccounts(),
                 getTaskVideos({}),
-                getDailyEstimateSummary(),
+                getDashboardSummary(),
                 getAutoSyncStatus()
             ]);
-            setData({ accounts, rows, summary, sync });
+            const summary = {
+                yesterdayEstimatedTotal: dashboard.yesterdayFinalEstimatedTotal,
+                todayEstimatedTotal: dashboard.realtimeEstimatedTotal,
+                dailyIncrease: dashboard.dailyIncrease,
+                snapshotDate: dashboard.snapshotDate,
+                expectedAccountCount: dashboard.snapshot.expectedAccountCount,
+                freshAccountCount: dashboard.snapshot.freshAccountCount,
+                carriedForwardAccountCount: dashboard.snapshot.carriedForwardAccountCount,
+                missingAccountCount: dashboard.snapshot.missingAccountCount,
+                isComplete: dashboard.snapshot.isComplete
+            };
+            setData({ accounts, rows, summary, dashboard, sync });
         }
         catch (caught) {
             setError(caught instanceof Error ? caught.message : "数据加载失败");
@@ -71,11 +82,15 @@ export default function AppShell() {
     const insights = useMemo(() => {
         const today = getShanghaiDate(new Date());
         const activeAccounts = data.accounts.filter((account) => account.loginStatus === "active").length;
-        const exceptions = data.accounts.filter((account) => account.lastError || account.loginStatus !== "active");
+        const exceptions = data.dashboard
+            ? data.dashboard.accounts.exceptions
+            : data.accounts
+                .filter((account) => account.lastError || account.loginStatus !== "active")
+                .map((account) => ({ accountId: account.id, displayName: account.displayName, message: account.lastError, lastSyncAt: account.lastSyncAt }));
         const staleAccounts = data.accounts.filter((account) => getFreshness(account.lastSyncAt).tone !== "good");
         const publishedToday = data.rows.filter((row) => row.publishedAt && getShanghaiDate(row.publishedAt) === today).length;
         const rankedTasks = [...data.rows].sort((left, right) => (right.todayPredictedDelta ?? -Infinity) - (left.todayPredictedDelta ?? -Infinity));
-        const lastSyncAt = data.accounts.reduce((latest, account) => {
+        const lastSyncAt = data.dashboard?.updatedAt ?? data.accounts.reduce((latest, account) => {
             if (!account.lastSyncAt || (latest && latest >= account.lastSyncAt)) {
                 return latest;
             }
@@ -86,7 +101,7 @@ export default function AppShell() {
     const summary = data.summary;
     const deltaTone = (summary?.dailyIncrease ?? 0) < 0 ? "negative" : "positive";
     const drawerTask = selectedTask;
-    return (_jsxs("div", { className: "v1-app", children: [_jsxs("aside", { className: "v1-sidebar", "aria-label": "\u4E3B\u5BFC\u822A", children: [_jsxs("div", { className: "v1-brand", children: [_jsx("span", { children: "DY" }), _jsxs("div", { children: [_jsx("strong", { children: "\u661F\u56FE\u9A7E\u9A76\u8231" }), _jsx("small", { children: "v1 \u5F00\u53D1\u7248" })] })] }), _jsx("nav", { children: navigation.map((item) => (_jsx("button", { type: "button", className: page === item.id ? "v1-nav-item active" : "v1-nav-item", onClick: () => setPage(item.id), children: item.label }, item.id))) }), _jsxs("div", { className: "v1-sidebar-footer", children: [_jsx("span", { children: "\u6570\u636E\u65E5\u671F" }), _jsx("strong", { children: getShanghaiDate(new Date()) })] })] }), _jsxs("main", { className: "v1-main", children: [_jsxs("header", { className: "v1-topbar", children: [_jsxs("div", { children: [_jsx("p", { children: "\u6296\u97F3\u661F\u56FE\u7ECF\u8425\u9A7E\u9A76\u8231" }), _jsx("h1", { children: pageTitles[page] })] }), _jsxs("div", { className: "v1-topbar-actions", children: [_jsxs("span", { className: "v1-last-updated", children: ["\u66F4\u65B0\u4E8E ", formatDateTime(insights.lastSyncAt)] }), _jsx("button", { type: "button", className: "v1-refresh", onClick: () => void refresh(), disabled: loading, children: loading ? "更新中" : "刷新" })] })] }), error ? _jsx("div", { className: "v1-alert", children: error }) : null, _jsxs("div", { className: "v1-workspace", children: [_jsxs("section", { className: "v1-content", "aria-busy": loading, children: [page === "dashboard" ? (_jsxs(_Fragment, { children: [_jsxs("div", { className: "v1-metric-grid", children: [_jsx(Metric, { label: "\u4ECA\u65E5\u5B9E\u65F6\u9884\u4F30", value: formatMoney(summary?.todayEstimatedTotal), caption: "\u5B9E\u65F6" }), _jsx(Metric, { label: "\u6628\u65E5\u6700\u7EC8\u9884\u4F30", value: formatMoney(summary?.yesterdayEstimatedTotal), caption: "\u6628\u65E5\u5DF2\u7ED3\u7B97" }), _jsx(Metric, { label: "\u4ECA\u65E5\u589E\u91CF", value: formatSignedMoney(summary?.dailyIncrease), caption: summary?.isComplete ? "实时对昨日已结算" : "待补全", tone: deltaTone }), _jsx(Metric, { label: "\u4ECA\u65E5\u5DF2\u53D1\u5E03\u89C6\u9891", value: formatNumber(insights.publishedToday), caption: "\u6309\u4E0A\u6D77\u65E5\u671F" }), _jsx(Metric, { label: "\u6D3B\u8DC3\u8D26\u53F7", value: formatNumber(insights.activeAccounts), caption: `${formatNumber(data.accounts.length)} 个账号` }), _jsx(Metric, { label: "\u5F85\u5904\u7406\u8D26\u53F7", value: formatNumber(insights.exceptions.length), caption: summary?.isComplete ? "数据完整" : "快照待补全", tone: insights.exceptions.length ? "negative" : "positive" })] }), _jsxs("div", { className: "v1-section-header", children: [_jsxs("div", { children: [_jsx("h2", { children: "\u9700\u8981\u5904\u7406" }), _jsx("span", { children: "\u767B\u5F55\u3001\u540C\u6B65\u548C\u6570\u636E\u5B8C\u6574\u5EA6" })] }), _jsx(StatusBadge, { label: summary?.isComplete ? "快照完整" : "待补全", tone: summary?.isComplete ? "good" : "warn" })] }), insights.exceptions.length === 0 && insights.staleAccounts.length === 0 ? (_jsx(EmptyState, { title: "\u5F53\u524D\u6CA1\u6709\u5F85\u5904\u7406\u8D26\u53F7" })) : (_jsx("div", { className: "v1-queue", children: [...insights.exceptions, ...insights.staleAccounts.filter((account) => !insights.exceptions.some((item) => item.id === account.id))]
+    return (_jsxs("div", { className: "v1-app", children: [_jsxs("aside", { className: "v1-sidebar", "aria-label": "\u4E3B\u5BFC\u822A", children: [_jsxs("div", { className: "v1-brand", children: [_jsx("span", { children: "DY" }), _jsxs("div", { children: [_jsx("strong", { children: "\u661F\u56FE\u9A7E\u9A76\u8231" }), _jsx("small", { children: "v1 \u5F00\u53D1\u7248" })] })] }), _jsx("nav", { children: navigation.map((item) => (_jsx("button", { type: "button", className: page === item.id ? "v1-nav-item active" : "v1-nav-item", onClick: () => setPage(item.id), children: item.label }, item.id))) }), _jsxs("div", { className: "v1-sidebar-footer", children: [_jsx("span", { children: "\u6570\u636E\u65E5\u671F" }), _jsx("strong", { children: getShanghaiDate(new Date()) })] })] }), _jsxs("main", { className: "v1-main", children: [_jsxs("header", { className: "v1-topbar", children: [_jsxs("div", { children: [_jsx("p", { children: "\u6296\u97F3\u661F\u56FE\u7ECF\u8425\u9A7E\u9A76\u8231" }), _jsx("h1", { children: pageTitles[page] })] }), _jsxs("div", { className: "v1-topbar-actions", children: [_jsxs("span", { className: "v1-last-updated", children: ["\u66F4\u65B0\u4E8E ", formatDateTime(insights.lastSyncAt)] }), _jsx("button", { type: "button", className: "v1-refresh", onClick: () => void refresh(), disabled: loading, children: loading ? "更新中" : "刷新" })] })] }), error ? _jsx("div", { className: "v1-alert", children: error }) : null, _jsxs("div", { className: "v1-workspace", children: [_jsxs("section", { className: "v1-content", "aria-busy": loading, children: [page === "dashboard" ? (_jsxs(_Fragment, { children: [_jsxs("div", { className: "v1-metric-grid", children: [_jsx(Metric, { label: "\u4ECA\u65E5\u5B9E\u65F6\u9884\u4F30", value: formatMoney(summary?.todayEstimatedTotal), caption: "\u5B9E\u65F6" }), _jsx(Metric, { label: "\u6628\u65E5\u6700\u7EC8\u9884\u4F30", value: formatMoney(summary?.yesterdayEstimatedTotal), caption: "\u6628\u65E5\u5DF2\u7ED3\u7B97" }), _jsx(Metric, { label: "\u4ECA\u65E5\u589E\u91CF", value: formatSignedMoney(summary?.dailyIncrease), caption: summary?.isComplete ? "实时对昨日已结算" : "待补全", tone: deltaTone }), _jsx(Metric, { label: "\u4ECA\u65E5\u5DF2\u53D1\u5E03\u89C6\u9891", value: formatNumber(insights.publishedToday), caption: "\u6309\u4E0A\u6D77\u65E5\u671F" }), _jsx(Metric, { label: "\u6D3B\u8DC3\u8D26\u53F7", value: formatNumber(data.dashboard?.accounts.activeCount ?? insights.activeAccounts), caption: `${formatNumber(data.accounts.length)} 个账号` }), _jsx(Metric, { label: "\u5F85\u5904\u7406\u8D26\u53F7", value: formatNumber(data.dashboard?.accounts.pendingSyncCount ?? insights.exceptions.length), caption: summary?.isComplete ? "数据完整" : "快照待补全", tone: insights.exceptions.length ? "negative" : "positive" })] }), _jsxs("div", { className: "v1-section-header", children: [_jsxs("div", { children: [_jsx("h2", { children: "\u9700\u8981\u5904\u7406" }), _jsx("span", { children: "\u767B\u5F55\u3001\u540C\u6B65\u548C\u6570\u636E\u5B8C\u6574\u5EA6" })] }), _jsx(StatusBadge, { label: summary?.isComplete ? "快照完整" : "待补全", tone: summary?.isComplete ? "good" : "warn" })] }), insights.exceptions.length === 0 && insights.staleAccounts.length === 0 ? (_jsx(EmptyState, { title: "\u5F53\u524D\u6CA1\u6709\u5F85\u5904\u7406\u8D26\u53F7" })) : (_jsx("div", { className: "v1-queue", children: [...insights.exceptions.map((account) => ({ id: account.accountId, displayName: account.displayName, lastError: account.message, lastSyncAt: account.lastSyncAt })), ...insights.staleAccounts.filter((account) => !insights.exceptions.some((item) => item.accountId === account.id))]
                                                     .slice(0, 6)
                                                     .map((account) => {
                                                     const freshness = getFreshness(account.lastSyncAt);

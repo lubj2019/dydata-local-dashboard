@@ -1,4 +1,4 @@
-import type { AccountSummary, AutoSyncStatus, DailyEstimateSummary, TaskPlayGrowthPage, TaskVideoRow } from "./types";
+import type { AccountSummary, AutoSyncStatus, DashboardSummary, DailyEstimateSummary, TaskPlayGrowthPage, TaskVideoRow } from "./types";
 
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
@@ -56,6 +56,10 @@ export function getAutoSyncStatus(): Promise<AutoSyncStatus> {
 
 export function getDailyEstimateSummary(): Promise<DailyEstimateSummary> {
   return request<DailyEstimateSummary>("/api/daily-estimate-summary");
+}
+
+export function getDashboardSummary(): Promise<DashboardSummary> {
+  return request<DashboardSummary>("/api/v2/dashboard/summary");
 }
 
 export function runAllSync(): Promise<{ status: "started" | "queued" }> {
