@@ -369,7 +369,7 @@ function normalizeText(value: unknown): string | null {
 }
 
 export function extractAccountIdentity(text: string): AccountIdentity {
-  const identityMatch = text.match(/抖音\s+([^\n]+)\n抖音号[：:]\s*([^\n]+)/);
+  const identityMatch = text.match(/(?:^|\n)([^\n]+)\n抖音号\s*[：:]\s*([^\n]+)/);
 
   return {
     displayName: normalizeText(identityMatch?.[1]),

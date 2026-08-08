@@ -25,6 +25,13 @@ test("extractAccountIdentity reads the display name and Douyin ID from the creat
   );
 });
 
+test("extractAccountIdentity reads the current creator home page layout", () => {
+  assert.deepEqual(
+    extractAccountIdentity("首页\nAI分身\n夫子说⁹\n抖音号：94254330053\n这个人很懒，没有留下任何签名"),
+    { displayName: "夫子说⁹", douyinId: "94254330053" }
+  );
+});
+
 test("findPlatformLoginError detects Xingtu login failures", () => {
   const message = "\u7528\u6237\u672a\u767b\u5f55[20260716155022776D3CC6F83B4BE07D02]";
 
