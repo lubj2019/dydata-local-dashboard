@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.2 - 2026-08-09
+
+### Improved
+
+- Group videos from the same account and Star Map mission into one collapsible task card.
+- Summarize task-level amounts once and aggregate video-level playback and settlement metrics.
+- Hide the unclear manual video-binding action from the task analysis page.
+
 ## 1.0.1 - 2026-08-09
 
 ### Improved

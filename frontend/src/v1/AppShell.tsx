@@ -1,10 +1,11 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
-import { archiveV2Account, bindV2TaskVideo, createV2Account, getAccounts, getAutoSyncStatus, getDashboardSummary, getDashboardTrend, getV2Tasks, launchV2Login, runV2Sync, syncV2Account } from "../api";
+import { archiveV2Account, createV2Account, getAccounts, getAutoSyncStatus, getDashboardSummary, getDashboardTrend, getV2Tasks, launchV2Login, runV2Sync, syncV2Account } from "../api";
 import type { AccountSummary, AutoSyncStatus, DashboardSummary, DashboardTrend, DailyEstimateSummary, TaskVideoRow } from "../types";
 import { LoginStatusBadge, StatusBadge } from "./StatusBadge";
 import { formatDateTime, formatMoney, formatNumber, formatSignedMoney, getShanghaiDate } from "./format";
 import { nextVideoSort, sortVideoRows, type VideoSort, type VideoSortKey } from "../videoSorting";
+import { groupTaskRows } from "../taskGrouping";
 import "./v1.css";
 
 type PageId = "dashboard" | "accounts" | "tasks" | "videos" | "analytics";
@@ -237,7 +238,7 @@ export default function AppShell() {
             ) : null}
 
             {page === "accounts" ? <AccountsTable accounts={data.accounts} onRefresh={() => void refresh()} /> : null}
-            {page === "tasks" ? <TaskPage rows={data.rows} accounts={data.accounts} onSelect={setSelectedTask} onRefresh={() => void refresh()} /> : null}
+            {page === "tasks" ? <TaskPage rows={data.rows} accounts={data.accounts} onSelect={setSelectedTask} /> : null}
             {page === "videos" ? <VideoTable rows={data.rows} onSelect={setSelectedTask} /> : null}
             {page === "analytics" ? <AnalyticsState summary={summary} /> : null}
           </section>
@@ -338,29 +339,19 @@ function AccountsTable({ accounts, onRefresh }: { accounts: AccountSummary[]; on
 
 type TaskSort = "delta" | "estimate" | "play";
 
-type TaskGroupRow = {
-  task: TaskVideoRow;
-  videos: TaskVideoRow[];
-  actualPlayCount: number | null;
-  playDelta: number | null;
-};
-
 function TaskPage({
   rows,
   accounts,
-  onSelect,
-  onRefresh
+  onSelect
 }: {
   rows: TaskVideoRow[];
   accounts: AccountSummary[];
   onSelect: (row: TaskVideoRow) => void;
-  onRefresh: () => void;
 }) {
   const [accountId, setAccountId] = useState("");
   const [status, setStatus] = useState("");
   const [sort, setSort] = useState<TaskSort>("delta");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const statuses = useMemo(
@@ -368,50 +359,32 @@ function TaskPage({
     [rows]
   );
   const groups = useMemo(() => {
-    const grouped = new Map<string, TaskVideoRow[]>();
-    for (const row of rows) {
-      if (accountId && row.accountId !== accountId) continue;
-      if (status && row.taskStatus !== status) continue;
-      const items = grouped.get(row.taskId) ?? [];
-      items.push(row);
-      grouped.set(row.taskId, items);
-    }
-
-    const result: TaskGroupRow[] = [...grouped.values()].map((items) => {
-      const task = items[0]!;
-      const actualValues = items.map((item) => item.actualPlayCount).filter((value): value is number => value !== null);
-      const deltaValues = items.map((item) => item.playDelta).filter((value): value is number => value !== null);
-      return {
-        task,
-        videos: items.filter((item) => item.videoId),
-        actualPlayCount: actualValues.length ? actualValues.reduce((sum, value) => sum + value, 0) : null,
-        playDelta: deltaValues.length ? deltaValues.reduce((sum, value) => sum + value, 0) : null
-      };
-    });
+    const filtered = rows.filter((row) => (!accountId || row.accountId === accountId) && (!status || row.taskStatus === status));
+    const result = groupTaskRows(filtered);
 
     return result.sort((left, right) => {
-      const leftValue = sort === "delta" ? left.task.todayPredictedDelta : sort === "estimate" ? getTaskEstimate(left.task) : left.playDelta;
-      const rightValue = sort === "delta" ? right.task.todayPredictedDelta : sort === "estimate" ? getTaskEstimate(right.task) : right.playDelta;
+      const leftValue = sort === "delta" ? left.todayPredictedDelta : sort === "estimate" ? left.taskEstimate : left.playDelta;
+      const rightValue = sort === "delta" ? right.todayPredictedDelta : sort === "estimate" ? right.taskEstimate : right.playDelta;
       return (rightValue ?? -Infinity) - (leftValue ?? -Infinity) || left.task.taskName.localeCompare(right.task.taskName, "zh-CN");
     });
   }, [accountId, rows, sort, status]);
 
-  function toggle(taskId: string) {
-    setExpanded((current) => ({ ...current, [taskId]: !current[taskId] }));
+  function toggle(groupId: string) {
+    setExpanded((current) => ({ ...current, [groupId]: !current[groupId] }));
   }
 
   function exportRows() {
-    const output = groups.map(({ task, actualPlayCount, playDelta, videos }) => [
+    const output = groups.map(({ task, taskEstimate, yesterdayTaskPredictedAmount, todayPredictedDelta, xingtuPlayCount, actualPlayCount, playDelta, settledAmount, videos }) => [
       task.accountName,
       task.taskName,
       task.taskStatus,
-      getTaskEstimate(task),
-      task.yesterdayTaskPredictedAmount,
-      task.todayPredictedDelta,
-      task.xingtuPlayCount,
+      taskEstimate,
+      yesterdayTaskPredictedAmount,
+      todayPredictedDelta,
+      xingtuPlayCount,
       actualPlayCount,
       playDelta,
-      task.settledAmount,
+      settledAmount,
       task.lastSyncedAt,
       videos.length
     ]);
@@ -421,22 +394,6 @@ function TaskPage({
     XLSX.utils.book_append_sheet(workbook, worksheet, "任务分析");
     XLSX.writeFile(workbook, "任务分析.xlsx");
     setMessage("当前筛选结果已导出");
-  }
-
-  async function bindVideo(taskId: string) {
-    const videoId = window.prompt("输入要绑定的视频 ID");
-    if (!videoId?.trim()) return;
-    setBusyId(taskId);
-    setMessage(null);
-    try {
-      await bindV2TaskVideo(taskId, videoId.trim());
-      setMessage("视频已绑定");
-      onRefresh();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "视频绑定失败");
-    } finally {
-      setBusyId(null);
-    }
   }
 
   return (
@@ -462,21 +419,27 @@ function TaskPage({
       </div>
       {message ? <div className="v1-inline-message">{message}</div> : null}
       {groups.length === 0 ? <EmptyState title="暂无符合条件的任务" /> : (
-        <div className="v1-table-wrap"><table className="v1-table v1-task-table"><thead><tr><th>账号</th><th>任务名称</th><th>任务状态</th><th>当前预估</th><th>昨日预估</th><th>今日增量</th><th>任务播放量</th><th>实际播放量</th><th>播放差值</th><th>已发放金额</th><th>最后同步</th><th>操作</th></tr></thead><tbody>
-          {groups.map(({ task, videos, actualPlayCount, playDelta }) => (
-            <Fragment key={task.taskId}>
-              <tr onClick={() => onSelect(task)} className="v1-selectable-row">
-                <td>{task.accountName}</td><td>{task.taskName}</td><td><StatusBadge label={task.taskStatus} /></td>
-                <td>{formatMoney(getTaskEstimate(task))}</td><td>{formatMoney(task.yesterdayTaskPredictedAmount)}</td><td>{formatSignedMoney(task.todayPredictedDelta)}</td>
-                <td>{formatNumber(task.xingtuPlayCount)}</td><td>{formatNumber(actualPlayCount)}</td><td>{formatNumber(playDelta)}</td><td>{formatMoney(task.settledAmount)}</td><td>{formatDateTime(task.lastSyncedAt)}</td>
-                <td><div className="v1-row-actions"><button type="button" className="v1-button-secondary" onClick={(event) => { event.stopPropagation(); toggle(task.taskId); }}>{expanded[task.taskId] ? "收起" : "视频"}</button><button type="button" onClick={(event) => { event.stopPropagation(); void bindVideo(task.taskId); }} disabled={busyId !== null}>绑定</button></div></td>
-              </tr>
-              {expanded[task.taskId] ? <tr key={`${task.taskId}:details`}><td colSpan={12}><div className="v1-task-details">
-                {videos.length === 0 ? <span>暂无已绑定视频</span> : <table className="v1-table"><thead><tr><th>视频</th><th>状态</th><th>实际播放</th><th>播放差值</th><th>发布时间</th><th>绑定方式</th></tr></thead><tbody>{videos.map((video) => <tr key={`${task.taskId}:${video.videoId}`}><td>{video.videoTitle ?? video.videoId}</td><td>{video.videoStatus ?? "--"}</td><td>{formatNumber(video.actualPlayCount)}</td><td>{formatNumber(video.playDelta)}</td><td>{formatDateTime(video.publishedAt)}</td><td>{video.matchSource === "manual" ? "手工绑定" : "自动匹配"}</td></tr>)}</tbody></table>}
-              </div></td></tr> : null}
-            </Fragment>
-          ))}
-        </tbody></table></div>
+        <div className="v1-task-groups">
+          {groups.map(({ groupId, task, videos, taskEstimate, yesterdayTaskPredictedAmount, todayPredictedDelta, xingtuPlayCount, actualPlayCount, playDelta, settledAmount }) => {
+            const isExpanded = expanded[groupId] ?? false;
+            return <article className="v1-task-card" key={groupId}>
+              <div className="v1-task-card-header">
+                <button type="button" className="v1-task-card-toggle" aria-expanded={isExpanded} onClick={() => toggle(groupId)}>
+                  <span className="v1-task-card-heading"><small>{task.accountName}</small><strong>{task.taskName}</strong></span>
+                  <span className="v1-task-card-control">{isExpanded ? "收起视频" : "展开视频"}</span>
+                </button>
+                <button type="button" className="v1-text-action" onClick={() => onSelect(task)}>详情</button>
+              </div>
+              <div className="v1-task-card-meta"><StatusBadge label={task.taskStatus} /><span>{videos.length} 个视频</span><span>最后同步 {formatDateTime(task.lastSyncedAt)}</span></div>
+              <dl className="v1-task-card-metrics">
+                <div><dt>当前预估</dt><dd>{formatMoney(taskEstimate)}</dd></div><div><dt>昨日预估</dt><dd>{formatMoney(yesterdayTaskPredictedAmount)}</dd></div><div><dt>今日增量</dt><dd>{formatSignedMoney(todayPredictedDelta)}</dd></div><div><dt>任务播放</dt><dd>{formatNumber(xingtuPlayCount)}</dd></div><div><dt>实际播放</dt><dd>{formatNumber(actualPlayCount)}</dd></div><div><dt>播放差值</dt><dd>{formatNumber(playDelta)}</dd></div><div><dt>已发放金额</dt><dd>{formatMoney(settledAmount)}</dd></div>
+              </dl>
+              {isExpanded ? <div className="v1-task-details">
+                {videos.length === 0 ? <span>暂无已绑定视频</span> : <table className="v1-table"><thead><tr><th>视频</th><th>状态</th><th>实际播放</th><th>播放差值</th><th>发布时间</th><th>匹配方式</th></tr></thead><tbody>{videos.map((video) => <tr key={`${groupId}:${video.videoId}`}><td>{video.videoTitle ?? video.videoId}</td><td>{video.videoStatus ?? "--"}</td><td>{formatNumber(video.actualPlayCount)}</td><td>{formatNumber(video.playDelta)}</td><td>{formatDateTime(video.publishedAt)}</td><td>{video.matchSource === "manual" ? "手工绑定" : "自动匹配"}</td></tr>)}</tbody></table>}
+              </div> : null}
+            </article>;
+          })}
+        </div>
       )}
     </>
   );
