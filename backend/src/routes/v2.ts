@@ -12,7 +12,7 @@ function readText(body: unknown, field: "displayName" | "videoId"): string {
   return value.trim();
 }
 
-function accountPayload(account: ReturnType<AppDatabase["getAccount"]>) {
+function accountPayload(account: ReturnType<AppDatabase["getAccount"]>, isSyncing = false) {
   if (!account) {
     return null;
   }
@@ -21,6 +21,7 @@ function accountPayload(account: ReturnType<AppDatabase["getAccount"]>) {
     displayName: account.displayName,
     douyinId: account.douyinId,
     loginStatus: account.loginStatus,
+    isSyncing,
     lastSyncAt: account.lastSyncAt,
     lastError: account.lastError,
     archivedAt: account.archivedAt
@@ -60,7 +61,7 @@ export function registerV2Routes(app: FastifyInstance, db: AppDatabase, scraper:
   app.get("/api/v2/accounts", async (request) => {
     const query = request.query as { archived?: string };
     const includeArchived = query.archived === "true";
-    return db.listAccounts({ includeArchived }).map(accountPayload);
+    return db.listAccounts({ includeArchived }).map((account) => accountPayload(account, scraper.isSyncing(account.id)));
   });
 
   app.post("/api/v2/accounts", async (request, reply) => {

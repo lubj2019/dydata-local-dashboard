@@ -74,6 +74,26 @@ test("sync automatically starts QR login after a confirmed logged-out response",
   assert.equal(loginStarts, 1);
 });
 
+test("syncing status tracks an active account sync job", async () => {
+  const accountId = "account-1";
+  const scraper = new ScraperService({
+    getAccount: () => ({ id: accountId, loginStatus: "active" })
+  } as never);
+  let releaseJob!: () => void;
+  (scraper as unknown as { runSyncAccount: () => Promise<void> }).runSyncAccount = () =>
+    new Promise<void>((resolve) => {
+      releaseJob = resolve;
+    });
+
+  const syncJob = scraper.syncAccount(accountId);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(scraper.isSyncing(accountId), true);
+
+  releaseJob();
+  await syncJob;
+  assert.equal(scraper.isSyncing(accountId), false);
+});
+
 test("creator login probe accepts an authenticated creator task API response", () => {
   assert.equal(isCreatorTaskApiLoggedIn({ status_code: 0 }), true);
   assert.equal(isCreatorTaskApiLoggedIn({ base_resp: { status_code: 11001 } }), false);

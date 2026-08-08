@@ -4,6 +4,7 @@ export type AccountSummary = {
   douyinId: string | null;
   platform: string;
   loginStatus: string;
+  isSyncing: boolean;
   lastSyncAt: string | null;
   lastError: string | null;
 };

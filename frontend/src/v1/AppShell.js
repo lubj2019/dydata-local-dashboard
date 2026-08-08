@@ -81,6 +81,15 @@ export default function AppShell() {
     useEffect(() => {
         void refresh();
     }, []);
+    useEffect(() => {
+        if (!data.accounts.some((account) => account.isSyncing)) {
+            return;
+        }
+        const timer = window.setInterval(() => {
+            void refresh();
+        }, 2000);
+        return () => window.clearInterval(timer);
+    }, [data.accounts]);
     const insights = useMemo(() => {
         const today = getShanghaiDate(new Date());
         const activeAccounts = data.accounts.filter((account) => account.loginStatus === "active").length;
@@ -112,21 +121,25 @@ export default function AppShell() {
 }
 function AccountsTable({ accounts, onRefresh }) {
     const [displayName, setDisplayName] = useState("");
-    const [busyId, setBusyId] = useState(null);
+    const [busyActions, setBusyActions] = useState({});
     const [message, setMessage] = useState(null);
-    async function run(action, id, success) {
-        setBusyId(id);
-        setMessage(null);
+    async function run(action, id, actionType, success, pendingMessage) {
+        setBusyActions((current) => ({ ...current, [id]: actionType }));
+        setMessage(pendingMessage ?? null);
         try {
             await action();
             setMessage(success);
-            onRefresh();
         }
         catch (error) {
             setMessage(error instanceof Error ? error.message : "操作失败");
         }
         finally {
-            setBusyId(null);
+            onRefresh();
+            setBusyActions((current) => {
+                const next = { ...current };
+                delete next[id];
+                return next;
+            });
         }
     }
     async function create() {
@@ -135,12 +148,15 @@ function AccountsTable({ accounts, onRefresh }) {
             setMessage("请输入账号名称");
             return;
         }
-        await run(() => createV2Account(value), "create", "账号已创建");
+        await run(() => createV2Account(value), "create", "create", "账号已创建");
         setDisplayName("");
     }
-    return (_jsxs(_Fragment, { children: [_jsxs("div", { className: "v1-section-header v1-account-toolbar", children: [_jsxs("div", { children: [_jsx("h2", { children: "\u6D3B\u8DC3\u8D26\u53F7" }), _jsx("span", { children: "\u9ED8\u8BA4\u9690\u85CF\u5DF2\u5F52\u6863\u8D26\u53F7" })] }), _jsxs("div", { className: "v1-account-actions", children: [_jsx("input", { value: displayName, onChange: (event) => setDisplayName(event.target.value), placeholder: "\u65B0\u589E\u8D26\u53F7\u540D\u79F0" }), _jsx("button", { type: "button", onClick: () => void create(), disabled: busyId !== null, children: "\u65B0\u589E\u8D26\u53F7" }), _jsx("button", { type: "button", className: "v1-button-secondary", onClick: () => void run(runV2Sync, "all", "批量同步已提交"), disabled: busyId !== null, children: "\u6279\u91CF\u540C\u6B65" })] })] }), message ? _jsx("div", { className: "v1-inline-message", children: message }) : null, accounts.length === 0 ? _jsx(EmptyState, { title: "\u6682\u65E0\u6D3B\u8DC3\u8D26\u53F7" }) : (_jsx("div", { className: "v1-table-wrap", children: _jsxs("table", { className: "v1-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "\u8D26\u53F7\u540D\u79F0" }), _jsx("th", { children: "\u6296\u97F3\u53F7" }), _jsx("th", { children: "\u767B\u5F55\u72B6\u6001" }), _jsx("th", { children: "\u6700\u8FD1\u540C\u6B65" }), _jsx("th", { children: "\u6570\u636E\u65B0\u9C9C\u5EA6" }), _jsx("th", { children: "\u6700\u8FD1\u9519\u8BEF" }), _jsx("th", { children: "\u64CD\u4F5C" })] }) }), _jsx("tbody", { children: accounts.map((account) => {
+    return (_jsxs(_Fragment, { children: [_jsxs("div", { className: "v1-section-header v1-account-toolbar", children: [_jsxs("div", { children: [_jsx("h2", { children: "\u6D3B\u8DC3\u8D26\u53F7" }), _jsx("span", { children: "\u9ED8\u8BA4\u9690\u85CF\u5DF2\u5F52\u6863\u8D26\u53F7" })] }), _jsxs("div", { className: "v1-account-actions", children: [_jsx("input", { value: displayName, onChange: (event) => setDisplayName(event.target.value), placeholder: "\u65B0\u589E\u8D26\u53F7\u540D\u79F0" }), _jsx("button", { type: "button", onClick: () => void create(), disabled: Object.keys(busyActions).length > 0, children: "\u65B0\u589E\u8D26\u53F7" }), _jsx("button", { type: "button", className: "v1-button-secondary", onClick: () => void run(runV2Sync, "all", "batch", "批量同步已提交", "正在提交批量同步..."), disabled: Object.keys(busyActions).length > 0, children: "\u6279\u91CF\u540C\u6B65" })] })] }), message ? _jsx("div", { className: "v1-inline-message", children: message }) : null, accounts.length === 0 ? _jsx(EmptyState, { title: "\u6682\u65E0\u6D3B\u8DC3\u8D26\u53F7" }) : (_jsx("div", { className: "v1-table-wrap", children: _jsxs("table", { className: "v1-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "\u8D26\u53F7\u540D\u79F0" }), _jsx("th", { children: "\u6296\u97F3\u53F7" }), _jsx("th", { children: "\u767B\u5F55\u72B6\u6001" }), _jsx("th", { children: "\u540C\u6B65\u72B6\u6001" }), _jsx("th", { children: "\u6700\u8FD1\u540C\u6B65" }), _jsx("th", { children: "\u6570\u636E\u65B0\u9C9C\u5EA6" }), _jsx("th", { children: "\u6700\u8FD1\u9519\u8BEF" }), _jsx("th", { children: "\u64CD\u4F5C" })] }) }), _jsx("tbody", { children: accounts.map((account) => {
                                 const freshness = getFreshness(account.lastSyncAt);
-                                return _jsxs("tr", { children: [_jsx("td", { children: account.displayName }), _jsx("td", { children: account.douyinId ?? "--" }), _jsx("td", { children: _jsx(LoginStatusBadge, { status: account.loginStatus }) }), _jsx("td", { children: formatDateTime(account.lastSyncAt) }), _jsx("td", { children: _jsx(StatusBadge, { ...freshness }) }), _jsx("td", { className: "v1-cell-error", children: account.lastError ?? "--" }), _jsx("td", { children: _jsxs("div", { className: "v1-row-actions", children: [_jsx("button", { type: "button", onClick: () => void run(() => launchV2Login(account.id), account.id, "登录窗口已启动"), disabled: busyId !== null, children: "\u767B\u5F55" }), _jsx("button", { type: "button", onClick: () => void run(() => syncV2Account(account.id), account.id, "同步已完成"), disabled: busyId !== null, children: "\u540C\u6B65" }), _jsx("button", { type: "button", className: "v1-button-secondary", onClick: () => void run(() => archiveV2Account(account.id), account.id, "账号已归档"), disabled: busyId !== null, children: "\u5F52\u6863" })] }) })] }, account.id);
+                                const rowAction = busyActions[account.id];
+                                const rowBusy = rowAction !== undefined;
+                                const syncing = account.isSyncing || rowAction === "sync";
+                                return _jsxs("tr", { children: [_jsx("td", { children: account.displayName }), _jsx("td", { children: account.douyinId ?? "--" }), _jsx("td", { children: _jsx(LoginStatusBadge, { status: account.loginStatus }) }), _jsx("td", { children: _jsx(StatusBadge, { label: syncing ? "同步中" : "空闲", tone: syncing ? "warn" : "neutral" }) }), _jsx("td", { children: formatDateTime(account.lastSyncAt) }), _jsx("td", { children: _jsx(StatusBadge, { ...freshness }) }), _jsx("td", { className: "v1-cell-error", children: account.lastError ?? "--" }), _jsx("td", { children: _jsxs("div", { className: "v1-row-actions", children: [_jsx("button", { type: "button", onClick: () => void run(() => launchV2Login(account.id), account.id, "login", "登录窗口已启动"), disabled: rowBusy || account.isSyncing, children: "\u767B\u5F55" }), _jsx("button", { type: "button", onClick: () => void run(() => syncV2Account(account.id), account.id, "sync", "同步已完成", `正在同步${account.displayName}...`), disabled: rowBusy || account.isSyncing, children: syncing ? "同步中..." : "同步" }), _jsx("button", { type: "button", className: "v1-button-secondary", onClick: () => void run(() => archiveV2Account(account.id), account.id, "archive", "账号已归档"), disabled: rowBusy || account.isSyncing, children: "\u5F52\u6863" })] }) })] }, account.id);
                             }) })] }) }))] }));
 }
 function TaskPage({ rows, accounts, onSelect, onRefresh }) {

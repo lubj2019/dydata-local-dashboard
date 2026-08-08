@@ -23,6 +23,7 @@ export function registerAccountRoutes(app: FastifyInstance, db: AppDatabase, scr
       douyinId: account.douyinId,
       platform: account.platform,
       loginStatus: account.loginStatus,
+      isSyncing: scraper.isSyncing(account.id),
       lastSyncAt: account.lastSyncAt,
       lastError: account.lastError,
       firstLoggedInAt: account.firstLoggedInAt,

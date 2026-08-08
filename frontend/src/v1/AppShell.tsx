@@ -106,6 +106,18 @@ export default function AppShell() {
     void refresh();
   }, []);
 
+  useEffect(() => {
+    if (!data.accounts.some((account) => account.isSyncing)) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void refresh();
+    }, 2000);
+
+    return () => window.clearInterval(timer);
+  }, [data.accounts]);
+
   const insights = useMemo(() => {
     const today = getShanghaiDate(new Date());
     const activeAccounts = data.accounts.filter((account) => account.loginStatus === "active").length;
@@ -265,20 +277,30 @@ export default function AppShell() {
 
 function AccountsTable({ accounts, onRefresh }: { accounts: AccountSummary[]; onRefresh: () => void }) {
   const [displayName, setDisplayName] = useState("");
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [busyActions, setBusyActions] = useState<Record<string, "create" | "batch" | "login" | "sync" | "archive">>({});
   const [message, setMessage] = useState<string | null>(null);
 
-  async function run(action: () => Promise<unknown>, id: string, success: string) {
-    setBusyId(id);
-    setMessage(null);
+  async function run(
+    action: () => Promise<unknown>,
+    id: string,
+    actionType: "create" | "batch" | "login" | "sync" | "archive",
+    success: string,
+    pendingMessage?: string
+  ) {
+    setBusyActions((current) => ({ ...current, [id]: actionType }));
+    setMessage(pendingMessage ?? null);
     try {
       await action();
       setMessage(success);
-      onRefresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "操作失败");
     } finally {
-      setBusyId(null);
+      onRefresh();
+      setBusyActions((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
     }
   }
 
@@ -288,7 +310,7 @@ function AccountsTable({ accounts, onRefresh }: { accounts: AccountSummary[]; on
       setMessage("请输入账号名称");
       return;
     }
-    await run(() => createV2Account(value), "create", "账号已创建");
+    await run(() => createV2Account(value), "create", "create", "账号已创建");
     setDisplayName("");
   }
 
@@ -296,14 +318,17 @@ function AccountsTable({ accounts, onRefresh }: { accounts: AccountSummary[]; on
     <>
       <div className="v1-section-header v1-account-toolbar">
         <div><h2>活跃账号</h2><span>默认隐藏已归档账号</span></div>
-        <div className="v1-account-actions"><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="新增账号名称" /><button type="button" onClick={() => void create()} disabled={busyId !== null}>新增账号</button><button type="button" className="v1-button-secondary" onClick={() => void run(runV2Sync, "all", "批量同步已提交")} disabled={busyId !== null}>批量同步</button></div>
+        <div className="v1-account-actions"><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="新增账号名称" /><button type="button" onClick={() => void create()} disabled={Object.keys(busyActions).length > 0}>新增账号</button><button type="button" className="v1-button-secondary" onClick={() => void run(runV2Sync, "all", "batch", "批量同步已提交", "正在提交批量同步...")} disabled={Object.keys(busyActions).length > 0}>批量同步</button></div>
       </div>
       {message ? <div className="v1-inline-message">{message}</div> : null}
       {accounts.length === 0 ? <EmptyState title="暂无活跃账号" /> : (
-        <div className="v1-table-wrap"><table className="v1-table"><thead><tr><th>账号名称</th><th>抖音号</th><th>登录状态</th><th>最近同步</th><th>数据新鲜度</th><th>最近错误</th><th>操作</th></tr></thead><tbody>
+        <div className="v1-table-wrap"><table className="v1-table"><thead><tr><th>账号名称</th><th>抖音号</th><th>登录状态</th><th>同步状态</th><th>最近同步</th><th>数据新鲜度</th><th>最近错误</th><th>操作</th></tr></thead><tbody>
           {accounts.map((account) => {
             const freshness = getFreshness(account.lastSyncAt);
-            return <tr key={account.id}><td>{account.displayName}</td><td>{account.douyinId ?? "--"}</td><td><LoginStatusBadge status={account.loginStatus} /></td><td>{formatDateTime(account.lastSyncAt)}</td><td><StatusBadge {...freshness} /></td><td className="v1-cell-error">{account.lastError ?? "--"}</td><td><div className="v1-row-actions"><button type="button" onClick={() => void run(() => launchV2Login(account.id), account.id, "登录窗口已启动")} disabled={busyId !== null}>登录</button><button type="button" onClick={() => void run(() => syncV2Account(account.id), account.id, "同步已完成")} disabled={busyId !== null}>同步</button><button type="button" className="v1-button-secondary" onClick={() => void run(() => archiveV2Account(account.id), account.id, "账号已归档")} disabled={busyId !== null}>归档</button></div></td></tr>;
+            const rowAction = busyActions[account.id];
+            const rowBusy = rowAction !== undefined;
+            const syncing = account.isSyncing || rowAction === "sync";
+            return <tr key={account.id}><td>{account.displayName}</td><td>{account.douyinId ?? "--"}</td><td><LoginStatusBadge status={account.loginStatus} /></td><td><StatusBadge label={syncing ? "同步中" : "空闲"} tone={syncing ? "warn" : "neutral"} /></td><td>{formatDateTime(account.lastSyncAt)}</td><td><StatusBadge {...freshness} /></td><td className="v1-cell-error">{account.lastError ?? "--"}</td><td><div className="v1-row-actions"><button type="button" onClick={() => void run(() => launchV2Login(account.id), account.id, "login", "登录窗口已启动")} disabled={rowBusy || account.isSyncing}>登录</button><button type="button" onClick={() => void run(() => syncV2Account(account.id), account.id, "sync", "同步已完成", `正在同步${account.displayName}...`)} disabled={rowBusy || account.isSyncing}>{syncing ? "同步中..." : "同步"}</button><button type="button" className="v1-button-secondary" onClick={() => void run(() => archiveV2Account(account.id), account.id, "archive", "账号已归档")} disabled={rowBusy || account.isSyncing}>归档</button></div></td></tr>;
           })}
         </tbody></table></div>
       )}

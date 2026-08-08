@@ -772,6 +772,10 @@ export class ScraperService {
     await job;
   }
 
+  isSyncing(accountId: string): boolean {
+    return this.syncJobs.has(accountId);
+  }
+
   private requireAccount(accountId: string): AccountRecord {
     const account = this.db.getAccount(accountId);
     if (!account) {
