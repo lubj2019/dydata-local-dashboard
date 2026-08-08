@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.3 - 2026-08-09
+
+### Improved
+
+- Refine the v1 dashboard hierarchy, color system, spacing, surfaces, and data typography.
+- Add responsive layouts for desktop, narrow desktop, and mobile workspaces.
+- Add loading skeletons, keyboard focus states, and an explicit details-drawer close action.
+- Improve scanning and state feedback across task, account, video, and analytics pages.
+- Align the task filter toolbar and export button with the dashboard control styling.
+
 ## 1.0.2 - 2026-08-09
 
 ### Improved

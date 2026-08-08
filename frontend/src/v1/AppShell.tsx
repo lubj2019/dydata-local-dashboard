@@ -53,9 +53,9 @@ function getFreshness(lastSyncAt: string | null): { label: string; tone: "good" 
   return { label: "已过期", tone: "danger" };
 }
 
-function Metric({ label, value, caption, tone = "default" }: { label: string; value: string; caption: string; tone?: "default" | "positive" | "negative" }) {
+function Metric({ label, value, caption, tone = "default", prominent = false }: { label: string; value: string; caption: string; tone?: "default" | "positive" | "negative"; prominent?: boolean }) {
   return (
-    <article className={`v1-metric v1-metric-${tone}`}>
+    <article className={`v1-metric v1-metric-${tone}${prominent ? " v1-metric-prominent" : ""}`}>
       <span>{label}</span>
       <strong>{value}</strong>
       <small>{caption}</small>
@@ -65,6 +65,17 @@ function Metric({ label, value, caption, tone = "default" }: { label: string; va
 
 function EmptyState({ title }: { title: string }) {
   return <div className="v1-empty">{title}</div>;
+}
+
+function LoadingState() {
+  return (
+    <div className="v1-loading-state" aria-label="正在加载数据">
+      <div className="v1-skeleton-grid">
+        {Array.from({ length: 6 }, (_, index) => <div className="v1-skeleton-metric" key={index} />)}
+      </div>
+      <div className="v1-skeleton-panel"><span /><span /><span /><span /></div>
+    </div>
+  );
 }
 
 export default function AppShell() {
@@ -186,13 +197,14 @@ export default function AppShell() {
           </div>
         </header>
 
-        {error ? <div className="v1-alert">{error}</div> : null}
+        {error ? <div className="v1-alert" role="alert">{error}</div> : null}
         <div className="v1-workspace">
           <section className="v1-content" aria-busy={loading}>
+            {loading && data.accounts.length === 0 ? <LoadingState /> : <>
             {page === "dashboard" ? (
               <>
                 <div className="v1-metric-grid">
-                  <Metric label="今日实时预估" value={formatMoney(summary?.todayEstimatedTotal)} caption="实时" />
+                  <Metric label="今日实时预估" value={formatMoney(summary?.todayEstimatedTotal)} caption="实时" prominent />
                   <Metric label="昨日最终预估" value={formatMoney(summary?.yesterdayEstimatedTotal)} caption="昨日已结算" />
                   <Metric label="今日增量" value={formatSignedMoney(summary?.dailyIncrease)} caption={summary?.isComplete ? "实时对昨日已结算" : "待补全"} tone={deltaTone} />
                   <Metric label="今日已发布视频" value={formatNumber(insights.publishedToday)} caption="按上海日期" />
@@ -241,12 +253,13 @@ export default function AppShell() {
             {page === "tasks" ? <TaskPage rows={data.rows} accounts={data.accounts} onSelect={setSelectedTask} /> : null}
             {page === "videos" ? <VideoTable rows={data.rows} onSelect={setSelectedTask} /> : null}
             {page === "analytics" ? <AnalyticsState summary={summary} /> : null}
+            </>}
           </section>
 
-          <aside className="v1-drawer" aria-label="详情">
+          <aside className={`v1-drawer${drawerTask ? " has-selection" : ""}`} aria-label="详情">
             {drawerTask ? (
               <>
-                <span className="v1-drawer-label">任务详情</span>
+                <div className="v1-drawer-heading"><span className="v1-drawer-label">任务详情</span><button type="button" className="v1-drawer-close" onClick={() => setSelectedTask(null)}>关闭</button></div>
                 <h2>{drawerTask.taskName}</h2>
                 <p>{drawerTask.accountName}</p>
                 <dl>
@@ -321,7 +334,7 @@ function AccountsTable({ accounts, onRefresh }: { accounts: AccountSummary[]; on
         <div><h2>活跃账号</h2><span>默认隐藏已归档账号</span></div>
         <div className="v1-account-actions"><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="新增账号名称" /><button type="button" onClick={() => void create()} disabled={Object.keys(busyActions).length > 0}>新增账号</button><button type="button" className="v1-button-secondary" onClick={() => void run(runV2Sync, "all", "batch", "批量同步已提交", "正在提交批量同步...")} disabled={Object.keys(busyActions).length > 0}>批量同步</button></div>
       </div>
-      {message ? <div className="v1-inline-message">{message}</div> : null}
+      {message ? <div className="v1-inline-message" role="status" aria-live="polite">{message}</div> : null}
       {accounts.length === 0 ? <EmptyState title="暂无活跃账号" /> : (
         <div className="v1-table-wrap"><table className="v1-table"><thead><tr><th>账号名称</th><th>抖音号</th><th>登录状态</th><th>同步状态</th><th>最近同步</th><th>数据新鲜度</th><th>最近错误</th><th>操作</th></tr></thead><tbody>
           {accounts.map((account) => {
@@ -329,7 +342,7 @@ function AccountsTable({ accounts, onRefresh }: { accounts: AccountSummary[]; on
             const rowAction = busyActions[account.id];
             const rowBusy = rowAction !== undefined;
             const syncing = account.isSyncing || rowAction === "sync";
-            return <tr key={account.id}><td>{account.displayName}</td><td>{account.douyinId ?? "--"}</td><td><LoginStatusBadge status={account.loginStatus} /></td><td><StatusBadge label={syncing ? "同步中" : "空闲"} tone={syncing ? "warn" : "neutral"} /></td><td>{formatDateTime(account.lastSyncAt)}</td><td><StatusBadge {...freshness} /></td><td className="v1-cell-error">{account.lastError ?? "--"}</td><td><div className="v1-row-actions"><button type="button" onClick={() => void run(() => launchV2Login(account.id), account.id, "login", "登录窗口已启动")} disabled={rowBusy || account.isSyncing}>登录</button><button type="button" onClick={() => void run(() => syncV2Account(account.id), account.id, "sync", "同步已完成", `正在同步${account.displayName}...`)} disabled={rowBusy || account.isSyncing}>{syncing ? "同步中..." : "同步"}</button><button type="button" className="v1-button-secondary" onClick={() => void run(() => archiveV2Account(account.id), account.id, "archive", "账号已归档")} disabled={rowBusy || account.isSyncing}>归档</button></div></td></tr>;
+            return <tr key={account.id}><td>{account.displayName}</td><td>{account.douyinId ?? "--"}</td><td><LoginStatusBadge status={account.loginStatus} /></td><td><StatusBadge label={syncing ? "同步中" : "空闲"} tone={syncing ? "warn" : "neutral"} /></td><td>{formatDateTime(account.lastSyncAt)}</td><td><StatusBadge {...freshness} /></td><td className="v1-cell-error" title={account.lastError ?? undefined}>{account.lastError ?? "--"}</td><td><div className="v1-row-actions"><button type="button" onClick={() => void run(() => launchV2Login(account.id), account.id, "login", "登录窗口已启动")} disabled={rowBusy || account.isSyncing}>登录</button><button type="button" onClick={() => void run(() => syncV2Account(account.id), account.id, "sync", "同步已完成", `正在同步${account.displayName}...`)} disabled={rowBusy || account.isSyncing}>{syncing ? "同步中..." : "同步"}</button><button type="button" className="v1-button-secondary" onClick={() => void run(() => archiveV2Account(account.id), account.id, "archive", "账号已归档")} disabled={rowBusy || account.isSyncing}>归档</button></div></td></tr>;
           })}
         </tbody></table></div>
       )}
@@ -417,7 +430,7 @@ function TaskPage({
           <button type="button" className="v1-button-secondary" onClick={exportRows} disabled={groups.length === 0}>导出</button>
         </div>
       </div>
-      {message ? <div className="v1-inline-message">{message}</div> : null}
+      {message ? <div className="v1-inline-message" role="status" aria-live="polite">{message}</div> : null}
       {groups.length === 0 ? <EmptyState title="暂无符合条件的任务" /> : (
         <div className="v1-task-groups">
           {groups.map(({ groupId, task, videos, taskEstimate, yesterdayTaskPredictedAmount, todayPredictedDelta, xingtuPlayCount, actualPlayCount, playDelta, settledAmount }) => {
