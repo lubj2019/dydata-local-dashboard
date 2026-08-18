@@ -49,6 +49,12 @@ export type DashboardSummary = {
   realtimeEstimatedTotal: number | null;
   yesterdayFinalEstimatedTotal: number | null;
   dailyIncrease: number | null;
+  dailyPlayGrowth: number | null;
+  dailyPlayGrowthCoverage: {
+    totalVideos: number;
+    eligibleVideos: number;
+    baselineDate: string;
+  };
   snapshotDate: string;
   snapshot: {
     expectedAccountCount: number;
@@ -95,6 +101,8 @@ export type TaskVideoRow = {
   publishedAt: string | null;
   xingtuPlayCount: number | null;
   actualPlayCount: number | null;
+  yesterdayActualPlayCount: number | null;
+  dailyPlayGrowth: number | null;
   playDelta: number | null;
   predictedAmount: number | null;
   missionEstimatedAmount: number | null;
@@ -107,6 +115,20 @@ export type TaskVideoRow = {
   taskStatus: string;
   lastSyncedAt: string | null;
   matchSource: MatchSource;
+};
+
+export type VideoPlayGrowthRow = {
+  videoId: string;
+  accountId: string;
+  accountName: string;
+  title: string;
+  taskName: string | null;
+  publishedAt: string | null;
+  actualPlayCount: number | null;
+  playDelta: number | null;
+  yesterdayActualPlayCount: number | null;
+  dailyPlayGrowth: number | null;
+  videoStatus: string;
 };
 
 export type TaskPlayGrowthRow = {

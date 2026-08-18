@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.4 - 2026-08-19
+
+### Added
+
+- Add dashboard and video-level daily play growth against the previous Shanghai-date snapshot.
+- Restore video task association and play-delta columns while keeping unique-video aggregation.
+
+### Improved
+
+- Combine active and pending account counts into a two-row account status metric.
+- Keep all video table columns visible with fixed widths and ellipsis for long task names.
+
 ## 1.0.3 - 2026-08-09
 
 ### Improved

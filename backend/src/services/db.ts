@@ -4,9 +4,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   AccountRecord,
+  DailyPlayGrowthSummary,
   TaskPlayGrowthPage,
   TaskPlayGrowthRow,
   TaskVideoRow,
+  VideoPlayGrowthRow,
   VideoRecord,
   XingtuTaskRecord
 } from "../domain/types.js";
@@ -968,7 +970,7 @@ export class AppDatabase {
       .all(accountId) as VideoRecord[];
   }
 
-  listTaskVideoRows(filters: { accountId?: string; status?: string }): TaskVideoRow[] {
+  listTaskVideoRows(filters: { accountId?: string; status?: string }, now = new Date()): TaskVideoRow[] {
     const clauses = ["a.archived_at IS NULL"];
     const params: Array<string> = [];
 
@@ -983,8 +985,8 @@ export class AppDatabase {
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
 
-    const yesterdayDate = getPreviousDateKey(new Date());
-    const todayDate = getShanghaiDateKey(new Date());
+    const yesterdayDate = getPreviousDateKey(now);
+    const todayDate = getShanghaiDateKey(now);
 
     return this.db
       .prepare(`
@@ -1014,6 +1016,13 @@ export class AppDatabase {
         baseline_accounts AS (
           SELECT DISTINCT account_id
           FROM yesterday_snapshots
+        ),
+        yesterday_video_snapshots AS (
+          SELECT snapshot.account_id, video.video_id, video.actual_play_count
+          FROM daily_account_snapshots snapshot
+          INNER JOIN daily_snapshot_videos video ON video.snapshot_id = snapshot.id
+          WHERE snapshot.snapshot_date = ?
+            AND snapshot.status IN ('fresh', 'carried_forward')
         )
         SELECT
           t.id as taskId,
@@ -1026,6 +1035,11 @@ export class AppDatabase {
           COALESCE(v.published_at, t.published_at) as publishedAt,
           t.xingtu_play_count as xingtuPlayCount,
           v.actual_play_count as actualPlayCount,
+          yesterdayVideo.actual_play_count as yesterdayActualPlayCount,
+          CASE
+            WHEN v.actual_play_count IS NULL OR yesterdayVideo.actual_play_count IS NULL THEN NULL
+            ELSE v.actual_play_count - yesterdayVideo.actual_play_count
+          END as dailyPlayGrowth,
           CASE
             WHEN t.xingtu_play_count IS NULL OR v.actual_play_count IS NULL THEN NULL
             ELSE v.actual_play_count - t.xingtu_play_count
@@ -1056,6 +1070,8 @@ export class AppDatabase {
         INNER JOIN accounts a ON a.id = t.account_id
         LEFT JOIN task_video_links l ON l.task_id = t.id
         LEFT JOIN videos v ON v.id = l.video_id
+        LEFT JOIN yesterday_video_snapshots yesterdayVideo
+          ON yesterdayVideo.account_id = t.account_id AND yesterdayVideo.video_id = l.video_id
         LEFT JOIN yesterday_snapshots ys ON ys.account_id = t.account_id AND ys.task_id = t.id
         LEFT JOIN yesterday_task_totals ytt ON ytt.account_id = t.account_id AND ytt.mission_id = t.mission_id
         LEFT JOIN today_snapshots ts ON ts.account_id = t.account_id AND ts.task_id = t.id
@@ -1063,7 +1079,71 @@ export class AppDatabase {
         ${where}
         ORDER BY a.display_name ASC, t.task_name ASC, COALESCE(v.published_at, t.published_at) DESC, t.id ASC
       `)
-      .all(yesterdayDate, yesterdayDate, todayDate, ...params) as TaskVideoRow[];
+      .all(yesterdayDate, yesterdayDate, todayDate, yesterdayDate, ...params) as TaskVideoRow[];
+  }
+
+  listVideoPlayGrowthRows(now = new Date()): VideoPlayGrowthRow[] {
+    const yesterdayDate = getPreviousDateKey(now);
+    return this.db
+      .prepare(`
+        WITH yesterday_video_snapshots AS (
+          SELECT snapshot.account_id, video.video_id, video.actual_play_count
+          FROM daily_account_snapshots snapshot
+          INNER JOIN daily_snapshot_videos video ON video.snapshot_id = snapshot.id
+          WHERE snapshot.snapshot_date = ?
+            AND snapshot.status IN ('fresh', 'carried_forward')
+        ),
+        linked_video_tasks AS (
+          SELECT
+            l.video_id,
+            GROUP_CONCAT(DISTINCT t.task_name) as taskName,
+            MAX(CASE
+              WHEN v.actual_play_count IS NULL OR t.xingtu_play_count IS NULL THEN NULL
+              ELSE v.actual_play_count - t.xingtu_play_count
+            END) as playDelta
+          FROM task_video_links l
+          INNER JOIN xingtu_tasks t ON t.id = l.task_id
+          INNER JOIN videos v ON v.id = l.video_id
+          GROUP BY l.video_id
+        )
+        SELECT
+          v.id as videoId,
+          v.account_id as accountId,
+          a.display_name as accountName,
+          v.title,
+          linked.taskName as taskName,
+          v.published_at as publishedAt,
+          v.actual_play_count as actualPlayCount,
+          linked.playDelta as playDelta,
+          yesterday.actual_play_count as yesterdayActualPlayCount,
+          CASE
+            WHEN v.actual_play_count IS NULL OR yesterday.actual_play_count IS NULL THEN NULL
+            ELSE v.actual_play_count - yesterday.actual_play_count
+          END as dailyPlayGrowth,
+          v.video_status as videoStatus
+        FROM videos v
+        INNER JOIN accounts a ON a.id = v.account_id
+        LEFT JOIN linked_video_tasks linked ON linked.video_id = v.id
+        LEFT JOIN yesterday_video_snapshots yesterday
+          ON yesterday.account_id = v.account_id AND yesterday.video_id = v.id
+        WHERE a.archived_at IS NULL
+        ORDER BY dailyPlayGrowth IS NULL ASC, dailyPlayGrowth DESC, v.actual_play_count DESC, v.published_at DESC, v.id ASC
+      `)
+      .all(yesterdayDate) as VideoPlayGrowthRow[];
+  }
+
+  getDailyPlayGrowthSummary(now = new Date()): DailyPlayGrowthSummary {
+    const baselineDate = getPreviousDateKey(now);
+    const rows = this.listVideoPlayGrowthRows(now);
+    const eligibleRows = rows.filter((row) => row.dailyPlayGrowth !== null);
+    return {
+      dailyPlayGrowth: eligibleRows.length === 0 ? null : eligibleRows.reduce((total, row) => total + row.dailyPlayGrowth!, 0),
+      dailyPlayGrowthCoverage: {
+        totalVideos: rows.length,
+        eligibleVideos: eligibleRows.length,
+        baselineDate
+      }
+    };
   }
 
   listTaskPlayGrowthPage(page: number, pageSize: number, now = new Date()): TaskPlayGrowthPage {

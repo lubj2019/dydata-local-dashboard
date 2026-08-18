@@ -27,6 +27,14 @@ export function formatNumber(value: number | null | undefined): string {
   return new Intl.NumberFormat("zh-CN").format(value);
 }
 
+export function formatSignedNumber(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "--";
+  }
+
+  return `${value > 0 ? "+" : ""}${formatNumber(value)}`;
+}
+
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) {
     return "--";

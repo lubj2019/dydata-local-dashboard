@@ -102,6 +102,9 @@ export function getV2Tasks(filters = {}) {
     const query = params.toString();
     return request(`/api/v2/tasks${query ? `?${query}` : ""}`);
 }
+export function getV2Videos() {
+    return request("/api/v2/videos");
+}
 export function bindV2TaskVideo(taskId, videoId) {
     return request(`/api/v2/tasks/${taskId}/video-link`, {
         method: "POST",

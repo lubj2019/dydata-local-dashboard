@@ -1,6 +1,6 @@
 import type { TaskVideoRow } from "./types";
 
-export type VideoSortKey = "publishedAt" | "actualPlayCount" | "playDelta";
+export type VideoSortKey = "publishedAt" | "actualPlayCount" | "playDelta" | "dailyPlayGrowth";
 export type VideoSortDirection = "asc" | "desc";
 export type VideoSort = { key: VideoSortKey; direction: VideoSortDirection };
 

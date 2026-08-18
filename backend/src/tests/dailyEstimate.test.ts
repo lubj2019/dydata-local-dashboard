@@ -379,6 +379,69 @@ test("play growth leaves missing baselines and current play counts empty", () =>
   db.deleteAccount(account.id);
 });
 
+test("daily video play growth is unique, baseline-aware, and excludes archived accounts", () => {
+  const db = new AppDatabase(":memory:");
+  const account = db.createAccount("daily video growth account");
+  const archived = db.createAccount("archived video growth account");
+  const yesterday = new Date("2026-07-19T12:00:00.000Z");
+  const today = new Date("2026-07-20T03:00:00.000Z");
+  const sharedVideo = video(account.id, "video-shared", 130);
+  const currentOnlyVideo = video(account.id, "video-current-only", 50);
+  const sharedTasks = [
+    { ...task(account.id, "task-a", "mission-a", 0), xingtuPlayCount: 100 },
+    { ...task(account.id, "task-b", "mission-b", 0), xingtuPlayCount: 80 }
+  ];
+  const sharedLinks = [
+    { taskId: "task-a", videoId: sharedVideo.id },
+    { taskId: "task-b", videoId: sharedVideo.id }
+  ];
+
+  db.replaceAccountSyncData(archived.id, playPayload(archived.id, "archived-task", 100), yesterday);
+  db.updateAccountStatus(archived.id, { loginStatus: "active", lastSyncAt: yesterday.toISOString() });
+  db.replaceAccountSyncData(account.id, {
+    tasks: sharedTasks,
+    videos: [{ ...sharedVideo, actualPlayCount: 100 }],
+    links: sharedLinks
+  }, yesterday);
+  db.updateAccountStatus(account.id, { loginStatus: "active", lastSyncAt: yesterday.toISOString() });
+  db.finalizeDailySnapshots(getShanghaiDateKey(yesterday), yesterday);
+  db.replaceAccountSyncData(account.id, {
+    tasks: sharedTasks,
+    videos: [sharedVideo, currentOnlyVideo],
+    links: sharedLinks
+  }, today);
+  db.updateAccountStatus(account.id, { loginStatus: "active", lastSyncAt: today.toISOString() });
+
+  db.finalizeDailySnapshots(getShanghaiDateKey(yesterday), yesterday);
+  db.replaceAccountSyncData(archived.id, playPayload(archived.id, "archived-task", 160), today);
+  db.updateAccountStatus(archived.id, { loginStatus: "active", lastSyncAt: today.toISOString() });
+  db.deleteAccount(archived.id);
+
+  const rows = db.listVideoPlayGrowthRows(today);
+  const sharedRow = rows.find((row) => row.videoId === "video-shared");
+  const currentOnlyRow = rows.find((row) => row.videoId === "video-current-only");
+  const taskRow = db.listTaskVideoRows({}, today).find((row) => row.taskId === "task-a");
+  assert.equal(rows.length, 2);
+  assert.equal(sharedRow?.taskName, "mission-a,mission-b");
+  assert.equal(sharedRow?.playDelta, 50);
+  assert.equal(currentOnlyRow?.taskName, null);
+  assert.equal(currentOnlyRow?.playDelta, null);
+  assert.equal(sharedRow?.dailyPlayGrowth, 30);
+  assert.equal(currentOnlyRow?.dailyPlayGrowth, null);
+  assert.equal(taskRow?.yesterdayActualPlayCount, 100);
+  assert.equal(taskRow?.dailyPlayGrowth, 30);
+  assert.deepEqual(db.getDailyPlayGrowthSummary(today), {
+    dailyPlayGrowth: 30,
+    dailyPlayGrowthCoverage: {
+      totalVideos: 2,
+      eligibleVideos: 1,
+      baselineDate: "2026-07-19"
+    }
+  });
+  assert.equal(rows.some((row) => row.accountName === "archived video growth account"), false);
+  db.deleteAccount(account.id);
+});
+
 test("play growth pagination is sorted by growth since the previous sync and clamps out-of-range pages", () => {
   const db = new AppDatabase(":memory:");
   const account = db.createAccount("play growth pagination account");

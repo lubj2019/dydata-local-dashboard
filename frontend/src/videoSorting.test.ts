@@ -15,6 +15,8 @@ function row(id: string, actualPlayCount: number | null, playDelta: number | nul
     publishedAt,
     xingtuPlayCount: null,
     actualPlayCount,
+    yesterdayActualPlayCount: null,
+    dailyPlayGrowth: playDelta,
     playDelta,
     predictedAmount: null,
     missionEstimatedAmount: null,
@@ -45,5 +47,6 @@ test("video sorting orders numeric and publication fields while keeping missing 
 
   assert.deepEqual(sortVideoRows(rows, { key: "actualPlayCount", direction: "desc" }).map((item) => item.taskId), ["c", "a", "b"]);
   assert.deepEqual(sortVideoRows(rows, { key: "playDelta", direction: "asc" }).map((item) => item.taskId), ["a", "c", "b"]);
+  assert.deepEqual(sortVideoRows(rows, { key: "dailyPlayGrowth", direction: "asc" }).map((item) => item.taskId), ["a", "c", "b"]);
   assert.deepEqual(sortVideoRows(rows, { key: "publishedAt", direction: "asc" }).map((item) => item.taskId), ["a", "c", "b"]);
 });

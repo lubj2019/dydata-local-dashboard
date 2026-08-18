@@ -21,6 +21,12 @@ export function formatNumber(value) {
     }
     return new Intl.NumberFormat("zh-CN").format(value);
 }
+export function formatSignedNumber(value) {
+    if (value === null || value === undefined || !Number.isFinite(value)) {
+        return "--";
+    }
+    return `${value > 0 ? "+" : ""}${formatNumber(value)}`;
+}
 export function formatDateTime(value) {
     if (!value) {
         return "--";

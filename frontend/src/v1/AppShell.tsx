@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
-import { archiveV2Account, createV2Account, getAccounts, getAutoSyncStatus, getDashboardSummary, getDashboardTrend, getV2Tasks, launchV2Login, runV2Sync, syncV2Account } from "../api";
-import type { AccountSummary, AutoSyncStatus, DashboardSummary, DashboardTrend, DailyEstimateSummary, TaskVideoRow } from "../types";
+import { archiveV2Account, createV2Account, getAccounts, getAutoSyncStatus, getDashboardSummary, getDashboardTrend, getV2Tasks, getV2Videos, launchV2Login, runV2Sync, syncV2Account } from "../api";
+import type { AccountSummary, AutoSyncStatus, DashboardSummary, DashboardTrend, DailyEstimateSummary, TaskVideoRow, VideoPlayGrowthRow } from "../types";
 import { LoginStatusBadge, StatusBadge } from "./StatusBadge";
-import { formatDateTime, formatMoney, formatNumber, formatSignedMoney, getShanghaiDate } from "./format";
+import { formatDateTime, formatMoney, formatNumber, formatSignedMoney, formatSignedNumber, getShanghaiDate } from "./format";
 import { nextVideoSort, sortVideoRows, type VideoSort, type VideoSortKey } from "../videoSorting";
 import { groupTaskRows } from "../taskGrouping";
 import "./v1.css";
@@ -13,6 +13,7 @@ type PageId = "dashboard" | "accounts" | "tasks" | "videos" | "analytics";
 type DataState = {
   accounts: AccountSummary[];
   rows: TaskVideoRow[];
+  videos: VideoPlayGrowthRow[];
   summary: DailyEstimateSummary | null;
   dashboard: DashboardSummary | null;
   sync: AutoSyncStatus | null;
@@ -63,6 +64,33 @@ function Metric({ label, value, caption, tone = "default", prominent = false }: 
   );
 }
 
+function AccountStatusMetric({ activeValue, activeCaption, pendingValue, pendingCaption, pendingTone }: {
+  activeValue: string;
+  activeCaption: string;
+  pendingValue: string;
+  pendingCaption: string;
+  pendingTone: "positive" | "negative";
+}) {
+  return (
+    <article className="v1-metric v1-account-metric" aria-label="账号状态">
+      <div className="v1-account-metric-row">
+        <div>
+          <span>活跃账号</span>
+          <strong>{activeValue}</strong>
+        </div>
+        <small>{activeCaption}</small>
+      </div>
+      <div className={`v1-account-metric-row v1-account-metric-row-${pendingTone}`}>
+        <div>
+          <span>待处理账号</span>
+          <strong>{pendingValue}</strong>
+        </div>
+        <small>{pendingCaption}</small>
+      </div>
+    </article>
+  );
+}
+
 function EmptyState({ title }: { title: string }) {
   return <div className="v1-empty">{title}</div>;
 }
@@ -80,7 +108,7 @@ function LoadingState() {
 
 export default function AppShell() {
   const [page, setPage] = useState<PageId>("dashboard");
-  const [data, setData] = useState<DataState>({ accounts: [], rows: [], summary: null, dashboard: null, sync: null });
+  const [data, setData] = useState<DataState>({ accounts: [], rows: [], videos: [], summary: null, dashboard: null, sync: null });
   const [selectedTask, setSelectedTask] = useState<TaskVideoRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -89,9 +117,10 @@ export default function AppShell() {
     setLoading(true);
     setError(null);
     try {
-      const [accounts, rows, dashboard, sync] = await Promise.all([
+      const [accounts, rows, videos, dashboard, sync] = await Promise.all([
         getAccounts(),
         getV2Tasks(),
+        getV2Videos(),
         getDashboardSummary(),
         getAutoSyncStatus()
       ]);
@@ -106,7 +135,7 @@ export default function AppShell() {
         missingAccountCount: dashboard.snapshot.missingAccountCount,
         isComplete: dashboard.snapshot.isComplete
       };
-      setData({ accounts, rows, summary, dashboard, sync });
+      setData({ accounts, rows, videos, summary, dashboard, sync });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "数据加载失败");
     } finally {
@@ -207,9 +236,20 @@ export default function AppShell() {
                   <Metric label="今日实时预估" value={formatMoney(summary?.todayEstimatedTotal)} caption="实时" prominent />
                   <Metric label="昨日最终预估" value={formatMoney(summary?.yesterdayEstimatedTotal)} caption="昨日已结算" />
                   <Metric label="今日增量" value={formatSignedMoney(summary?.dailyIncrease)} caption={summary?.isComplete ? "实时对昨日已结算" : "待补全"} tone={deltaTone} />
+                  <Metric
+                    label="今日新增播放量"
+                    value={formatSignedNumber(data.dashboard?.dailyPlayGrowth)}
+                    caption={`${data.dashboard?.dailyPlayGrowthCoverage.eligibleVideos ?? 0} / ${data.dashboard?.dailyPlayGrowthCoverage.totalVideos ?? 0} 个视频有昨日基线`}
+                    tone={(data.dashboard?.dailyPlayGrowth ?? 0) < 0 ? "negative" : "positive"}
+                  />
                   <Metric label="今日已发布视频" value={formatNumber(insights.publishedToday)} caption="按上海日期" />
-                  <Metric label="活跃账号" value={formatNumber(data.dashboard?.accounts.activeCount ?? insights.activeAccounts)} caption={`${formatNumber(data.accounts.length)} 个账号`} />
-                  <Metric label="待处理账号" value={formatNumber(data.dashboard?.accounts.pendingSyncCount ?? insights.exceptions.length)} caption={summary?.isComplete ? "数据完整" : "快照待补全"} tone={insights.exceptions.length ? "negative" : "positive"} />
+                  <AccountStatusMetric
+                    activeValue={formatNumber(data.dashboard?.accounts.activeCount ?? insights.activeAccounts)}
+                    activeCaption={`${formatNumber(data.accounts.length)} 个账号`}
+                    pendingValue={formatNumber(data.dashboard?.accounts.pendingSyncCount ?? insights.exceptions.length)}
+                    pendingCaption={summary?.isComplete ? "数据完整" : "快照待补全"}
+                    pendingTone={insights.exceptions.length ? "negative" : "positive"}
+                  />
                 </div>
 
                 <div className="v1-section-header">
@@ -251,7 +291,7 @@ export default function AppShell() {
 
             {page === "accounts" ? <AccountsTable accounts={data.accounts} onRefresh={() => void refresh()} /> : null}
             {page === "tasks" ? <TaskPage rows={data.rows} accounts={data.accounts} onSelect={setSelectedTask} /> : null}
-            {page === "videos" ? <VideoTable rows={data.rows} onSelect={setSelectedTask} /> : null}
+            {page === "videos" ? <VideoGrowthTable rows={data.videos} /> : null}
             {page === "analytics" ? <AnalyticsState summary={summary} /> : null}
             </>}
           </section>
@@ -482,6 +522,34 @@ function VideoTable({ rows, onSelect }: { rows: TaskVideoRow[]; onSelect: (row: 
 
   return <div className="v1-table-wrap"><table className="v1-table"><thead><tr><th>账号</th><th>视频标题</th><th>关联任务</th>{sortHeader("实际播放", "actualPlayCount")}{sortHeader("播放差值", "playDelta")}{sortHeader("发布时间", "publishedAt")}</tr></thead><tbody>
     {videos.map((row) => <tr key={`${row.taskId}:${row.videoId}`} onClick={() => onSelect(row)} className="v1-selectable-row"><td>{row.accountName}</td><td>{row.videoTitle ?? "--"}</td><td>{row.taskName}</td><td>{formatNumber(row.actualPlayCount)}</td><td>{formatNumber(row.playDelta)}</td><td>{formatDateTime(row.publishedAt)}</td></tr>)}
+  </tbody></table></div>;
+}
+
+function VideoGrowthTable({ rows }: { rows: VideoPlayGrowthRow[] }) {
+  const [sort, setSort] = useState<VideoSort | null>(null);
+  const sortedRows = useMemo(() => {
+    if (!sort) return rows;
+    return [...rows].sort((left, right) => {
+      const leftValue = sort.key === "actualPlayCount" ? left.actualPlayCount : sort.key === "playDelta" ? left.playDelta : sort.key === "dailyPlayGrowth" ? left.dailyPlayGrowth : left.publishedAt;
+      const rightValue = sort.key === "actualPlayCount" ? right.actualPlayCount : sort.key === "playDelta" ? right.playDelta : sort.key === "dailyPlayGrowth" ? right.dailyPlayGrowth : right.publishedAt;
+      if (leftValue === rightValue) return left.videoId.localeCompare(right.videoId);
+      if (leftValue === null || leftValue === undefined) return 1;
+      if (rightValue === null || rightValue === undefined) return -1;
+      const result = typeof leftValue === "number" && typeof rightValue === "number"
+        ? leftValue - rightValue
+        : String(leftValue).localeCompare(String(rightValue));
+      return sort.direction === "asc" ? result : -result;
+    });
+  }, [rows, sort]);
+
+  function sortHeader(label: string, key: VideoSortKey) {
+    const direction = sort?.key === key ? sort.direction : null;
+    return <th><button type="button" className={direction ? "v1-sort-button active" : "v1-sort-button"} onClick={() => setSort(nextVideoSort(sort, key))} aria-label={`${label}排序`}><span>{label}</span><span className="v1-sort-indicator" aria-hidden="true">{direction === "asc" ? "▲" : direction === "desc" ? "▼" : "↕"}</span></button></th>;
+  }
+
+  if (sortedRows.length === 0) return <EmptyState title="暂无视频数据" />;
+  return <div className="v1-table-wrap"><table className="v1-table v1-video-table"><thead><tr><th>账号</th><th>视频标题</th><th>关联任务</th>{sortHeader("实际播放", "actualPlayCount")}{sortHeader("播放差值", "playDelta")}<th>昨日实际播放</th>{sortHeader("今日新增播放量", "dailyPlayGrowth")}{sortHeader("发布时间", "publishedAt")}</tr></thead><tbody>
+    {sortedRows.map((row) => <tr key={row.videoId}><td>{row.accountName}</td><td>{row.title}</td><td title={row.taskName ?? undefined}>{row.taskName ?? "--"}</td><td>{formatNumber(row.actualPlayCount)}</td><td className={row.playDelta !== null && row.playDelta < 0 ? "v1-cell-negative" : undefined}>{formatSignedNumber(row.playDelta)}</td><td>{formatNumber(row.yesterdayActualPlayCount)}</td><td className={row.dailyPlayGrowth !== null && row.dailyPlayGrowth < 0 ? "v1-cell-negative" : undefined}>{formatSignedNumber(row.dailyPlayGrowth)}</td><td>{formatDateTime(row.publishedAt)}</td></tr>)}
   </tbody></table></div>;
 }
 

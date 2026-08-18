@@ -1,5 +1,6 @@
 import { getPreviousDateKey, getShanghaiDateKey } from "../domain/dailyEstimate.js";
 import type { AccountRecord } from "../domain/types.js";
+import type { DailyPlayGrowthSummary } from "../domain/types.js";
 import { AppDatabase, type DailyEstimateTrendPoint } from "./db.js";
 
 export type DashboardAccountState = {
@@ -18,6 +19,8 @@ export type DashboardSummary = {
   realtimeEstimatedTotal: number | null;
   yesterdayFinalEstimatedTotal: number | null;
   dailyIncrease: number | null;
+  dailyPlayGrowth: number | null;
+  dailyPlayGrowthCoverage: DailyPlayGrowthSummary["dailyPlayGrowthCoverage"];
   snapshotDate: string;
   snapshot: {
     expectedAccountCount: number;
@@ -118,6 +121,7 @@ export class StatisticsService {
 
   getDashboardSummary(now = new Date()): DashboardSummary {
     const estimate = this.db.getDailyEstimateSummary(now);
+    const playGrowth = this.db.getDailyPlayGrowthSummary(now);
     const snapshotDate = getPreviousDateKey(now);
     const accounts = this.db.listAccounts({ includeArchived: true });
     const accountsById = new Map(accounts.map((account) => [account.id, account]));
@@ -141,6 +145,8 @@ export class StatisticsService {
       realtimeEstimatedTotal: estimate.todayEstimatedTotal,
       yesterdayFinalEstimatedTotal: estimate.yesterdayEstimatedTotal,
       dailyIncrease: estimate.dailyIncrease,
+      dailyPlayGrowth: playGrowth.dailyPlayGrowth,
+      dailyPlayGrowthCoverage: playGrowth.dailyPlayGrowthCoverage,
       snapshotDate,
       snapshot: {
         expectedAccountCount: estimate.expectedAccountCount,

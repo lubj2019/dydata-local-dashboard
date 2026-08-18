@@ -111,6 +111,8 @@ export function registerV2Routes(app: FastifyInstance, db: AppDatabase, scraper:
     return db.listTaskVideoRows(filters);
   });
 
+  app.get("/api/v2/videos", async () => db.listVideoPlayGrowthRows());
+
   app.get("/api/v2/tasks/:taskId", async (request, reply) => {
     const taskId = (request.params as { taskId: string }).taskId;
     const task = db.listTaskVideoRows({}).find((item) => item.taskId === taskId);

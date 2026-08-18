@@ -1,4 +1,4 @@
-import type { AccountSummary, AutoSyncStatus, DashboardSummary, DashboardTrend, DailyEstimateSummary, TaskPlayGrowthPage, TaskVideoRow } from "./types";
+import type { AccountSummary, AutoSyncStatus, DashboardSummary, DashboardTrend, DailyEstimateSummary, TaskPlayGrowthPage, TaskVideoRow, VideoPlayGrowthRow } from "./types";
 
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
@@ -124,6 +124,10 @@ export function getV2Tasks(filters: { accountId?: string; status?: string } = {}
   }
   const query = params.toString();
   return request<TaskVideoRow[]>(`/api/v2/tasks${query ? `?${query}` : ""}`);
+}
+
+export function getV2Videos(): Promise<VideoPlayGrowthRow[]> {
+  return request<VideoPlayGrowthRow[]>("/api/v2/videos");
 }
 
 export function bindV2TaskVideo(taskId: string, videoId: string): Promise<{ status: string }> {
